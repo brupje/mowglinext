@@ -7,6 +7,7 @@
 # YardForce500
 # CUSTOM (put your configs in ~/mower_params/)
 export OM_MOWER="CUSTOM"
+export OM_NO_COMMS=true
 
 # Your Hardware Version (more a firmware version, really). Check the OpenMower docs (https://www.openmower.de/docs) for the firmware versions.
 # Supported values as of today:
@@ -84,6 +85,7 @@ export OM_OUTLINE_COUNT=4
 export OM_TOOL_WIDTH=0.13
 
 # Voltages for battery to be considered full or empty
+export OM_BATTERY_CRITICAL_VOLTAGE=22.0
 export OM_BATTERY_EMPTY_VOLTAGE=23.0
 export OM_BATTERY_FULL_VOLTAGE=28.0
 
