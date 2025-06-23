@@ -2,12 +2,12 @@
 ## Hardware Specific Settings ##
 ################################
 
+export OM_NO_COMMS=true
 # The type of mower you're using, used to get some hardware parameters automatically
 # Currently supported:
 # YardForce500
 # CUSTOM (put your configs in ~/mower_params/)
 export OM_MOWER="CUSTOM"
-export OM_NO_COMMS=true
 
 # Your Hardware Version (more a firmware version, really). Check the OpenMower docs (https://www.openmower.de/docs) for the firmware versions.
 # Supported values as of today:
@@ -107,8 +107,6 @@ export OM_ENABLE_MOWER=true
 export OM_AUTOMATIC_MODE=0
 
 export OM_OUTLINE_OFFSET=0.05
-
-export OM_NO_COMMS=false
 
 # Set default GPS antenna offset
 export OM_ANTENNA_OFFSET_X=0.3
