@@ -141,13 +141,13 @@ ros::Publisher pubButtonState("buttonstate", &buttonstate_msg);
 ros::Publisher pubOMStatus("/ll/mower_status", &om_mower_status_msg);
 ros::Publisher pubOMPower("/ll/power", &om_power_msg);
 ros::Publisher pubOMEmergency("/ll/emergency", &om_emergency_msg);
-ros::Publisher pubWheelTicks("/mower/wheel_ticks", &wheel_ticks_msg);
+ros::Publisher pubWheelTicks("/xbot_positioning/wheel_ticks_in", &wheel_ticks_msg);
 #ifdef ROS_PUBLISH_MOWGLI
 ros::Publisher pubStatus("mowgli/status", &status_msg);
 #endif
 
 // IMU external
-ros::Publisher pubIMU("imu/data_raw", &imu_msg);
+ros::Publisher pubIMU("/ll/imu/data_raw", &imu_msg);
 
 #if OPTION_ULTRASONIC == 1
 ros::Publisher pubLeftUltrasonic("ultrasonic/left", &ultrasonic_left_msg);
