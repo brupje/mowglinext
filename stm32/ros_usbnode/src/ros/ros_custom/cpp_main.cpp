@@ -130,6 +130,9 @@ mower_msgs::Status om_mower_status_msg;
 mower_msgs::Power om_power_msg;
 // om emergency message
 mower_msgs::Emergency om_emergency_msg;
+// om ESC status messages (drive motors)
+mower_msgs::ESCStatus om_left_esc_msg;
+mower_msgs::ESCStatus om_right_esc_msg;
 
 xbot_msgs::WheelTick wheel_ticks_msg;
 mower_msgs::HighLevelStatus high_level_status;
@@ -141,6 +144,8 @@ ros::Publisher pubButtonState("buttonstate", &buttonstate_msg);
 ros::Publisher pubOMStatus("/ll/mower_status", &om_mower_status_msg);
 ros::Publisher pubOMPower("/ll/power", &om_power_msg);
 ros::Publisher pubOMEmergency("/ll/emergency", &om_emergency_msg);
+ros::Publisher pubOMLeftEsc("/ll/diff_drive/left_esc_status", &om_left_esc_msg);
+ros::Publisher pubOMRightEsc("/ll/diff_drive/right_esc_status", &om_right_esc_msg);
 ros::Publisher pubWheelTicks("/xbot_positioning/wheel_ticks_in", &wheel_ticks_msg);
 #ifdef ROS_PUBLISH_MOWGLI
 ros::Publisher pubStatus("mowgli/status", &status_msg);
@@ -628,6 +633,19 @@ extern "C" void broadcast_handler()
 		om_emergency_msg.reason = Emergency_State() ? "emergency" : "";
 		pubOMEmergency.publish(&om_emergency_msg);
 
+		// Publish ESC status for drive motors
+		om_left_esc_msg.status = mower_msgs::ESCStatus::ESC_STATUS_OK;
+		om_left_esc_msg.current = (float)left_power / 1000.0;
+		om_left_esc_msg.temperature_pcb = 0;
+		om_left_esc_msg.temperature_motor = 0;
+		pubOMLeftEsc.publish(&om_left_esc_msg);
+
+		om_right_esc_msg.status = mower_msgs::ESCStatus::ESC_STATUS_OK;
+		om_right_esc_msg.current = (float)right_power / 1000.0;
+		om_right_esc_msg.temperature_pcb = 0;
+		om_right_esc_msg.temperature_motor = 0;
+		pubOMRightEsc.publish(&om_right_esc_msg);
+
 	}
 	// if (NBT_handler(&status_nbt))
 }
@@ -739,6 +757,8 @@ extern "C" void init_ROS()
 	nh.advertise(pubOMStatus);
 	nh.advertise(pubOMPower);
 	nh.advertise(pubOMEmergency);
+	nh.advertise(pubOMLeftEsc);
+	nh.advertise(pubOMRightEsc);
 	nh.advertise(pubWheelTicks);
 
 	// Initialize Subscribers
