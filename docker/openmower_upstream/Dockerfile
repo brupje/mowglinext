@@ -17,5 +17,6 @@ RUN mkdir -p /home/ubuntu/rosserial/src && cd /home/ubuntu/rosserial/src && git 
 RUN bash -c 'source /opt/ros/noetic/setup.bash && cd /home/ubuntu/rosserial && catkin_make -DCMAKE_INSTALL_PREFIX=/opt/ros/noetic install --only-pkg-with-deps rosserial_server'
 
 ADD scripts /home/ubuntu/scripts
+RUN chmod +x /home/ubuntu/scripts/*.sh
 
 CMD [ "/home/ubuntu/scripts/start_mowgli.sh" ]
