@@ -17,7 +17,7 @@ services:
       "com.centurylinklabs.watchtower.enable": true
       project: openmower
       app: gui
-    image: ghcr.io/cedbossneo/openmower-gui:master
+    image: ghcr.io/cedbossneo/openmower-gui:v2
     restart: unless-stopped
     network_mode: host
     privileged: true
