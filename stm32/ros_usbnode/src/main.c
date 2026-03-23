@@ -97,8 +97,8 @@ int debug_assert(int condition, const char *msg)
 int main(void)
 {
 
-  SystemClock_Config();
   HAL_Init();
+  SystemClock_Config();
 
 #if BOARD_YARDFORCE500_VARIANT_ORIG
   __HAL_RCC_AFIO_CLK_ENABLE();
@@ -159,14 +159,14 @@ int main(void)
   DB_TRACE(" * Testing supported IMUs:\r\n");
   IMU_Init();
   IMU_CalibrateExternal();
+  PANEL_Init();
+  DB_TRACE(" * Panel initialized\r\n");
   Emergency_Init();
   DB_TRACE(" * Emergency sensors initialized\r\n");
   TIM1_Init();
   DB_TRACE(" * Timer1 (Charge PWM) initialized\r\n");
   MX_USB_DEVICE_Init();
   DB_TRACE(" * USB CDC initialized\r\n");
-  PANEL_Init();
-  DB_TRACE(" * Panel initialized\r\n");
 // Init Drive Motors and Blade Motor
 #ifdef DRIVEMOTORS_USART_ENABLED
   DRIVEMOTOR_Init();

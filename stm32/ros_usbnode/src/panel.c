@@ -299,8 +299,6 @@ void PANEL_Tick(void)
 void PANEL_SendLEDMessage(void){
     uint8_t ptr = 0;
     uint8_t ptr_beginScndMsg = 0;
-//    uint8_t crc = 0;
-
     while( __HAL_UART_GET_FLAG(&PANEL_USART_Handler, USART_FLAG_TC) != 1);
 
     panel_pu8RqstMessage[ptr++] = 0x55;
