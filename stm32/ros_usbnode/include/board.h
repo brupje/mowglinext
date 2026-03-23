@@ -33,6 +33,7 @@ extern "C"
 #define PANEL_TYPE_YARDFORCE_500_CLASSIC 1
 #define PANEL_TYPE_YARDFORCE_LUV1000RI 2
 #define PANEL_TYPE_YARDFORCE_900_ECO 3
+#define PANEL_TYPE_YARDFORCE_500B_CLASSIC 4
 
 #if BOARD_YARDFORCE500_VARIANT_ORIG
 ///////////////////////////
@@ -59,11 +60,10 @@ extern "C"
 // Yardforce 500 B //
 /////////////////////
 
-// TODO: Are those options valid?
 #define BLADEMOTOR_USART_INSTANCE USART6
 
 #define VALID_BOARD_DEFINED 1
-#define PANEL_TYPE PANEL_TYPE_YARDFORCE_500_CLASSIC
+#define PANEL_TYPE PANEL_TYPE_YARDFORCE_500B_CLASSIC
 #define BLADEMOTOR_LENGTH_RECEIVED_MSG 16
 #define DEBUG_TYPE DEBUG_TYPE_SWO
 
@@ -74,6 +74,8 @@ extern "C"
 
 #define OPTION_ULTRASONIC 0
 #define OPTION_BUMPER 0
+
+#define BOARD_HAS_MASTER_USART 0
 #elif defined(BOARD_LUV1000RI) // TODO: This currently can't be selected via platformio
 #define PANEL_TYPE PANEL_TYPE_YARDFORCE_LUV1000RI
 #define BLADEMOTOR_LENGTH_RECEIVED_MSG 14
@@ -95,8 +97,10 @@ extern "C"
 
 /// nominal max charge current is 1.0 Amp
 #define MAX_CHARGE_CURRENT 1.0f
-/// Max voltage allowed 29.4
-#define MAX_CHARGE_VOLTAGE 29.4f
+/// Max voltage allowed
+#define MAX_CHARGE_VOLTAGE 29.0f
+/// Voltage threshold for CC to CV transition
+#define LIMIT_VOLTAGE_150MA 28.0f
 /// Default max battery voltage allowed
 #define BAT_CHARGE_CUTOFF_VOLTAGE  28.0f
 /// We consider the battery is full when in CV mode the current below 0.1A

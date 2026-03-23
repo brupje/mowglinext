@@ -105,6 +105,33 @@ typedef enum
     
     #define LED_STATE_SIZE 19       // model has 19-2 different leds to control ?
     #define LED_CMD 0x508e
+
+#elif PANEL_TYPE==PANEL_TYPE_YARDFORCE_500B_CLASSIC   // Yardforce 500B CLASSIC (Bluetooth)
+
+    #define PANEL_LED_LIFTED 0
+    #define PANEL_LED_SIGNAL 1
+    #define PANEL_LED_BATTERY_LOW 2
+    #define PANEL_LED_CHARGING 3
+    #define PANEL_LED_2H 4
+    #define PANEL_LED_4H 5
+    #define PANEL_LED_6H 6
+    #define PANEL_LED_8H 7
+    #define PANEL_LED_S1 8
+    #define PANEL_LED_S2 9
+    #define PANEL_LED_LOCK 10
+    #define PANEL_LED_MON 11
+    #define PANEL_LED_TUE 12
+    #define PANEL_LED_WED 13
+    #define PANEL_LED_THR 14
+    #define PANEL_LED_FRI 15
+    #define PANEL_LED_SAT 16
+    #define PANEL_LED_SUN 17
+    #define PANEL_LED_UNKNOWN 18
+
+    #define PANEL_LED_GPS 11
+
+    #define LED_STATE_SIZE 19       // model has 19-2 different leds to control ?
+    #define LED_CMD 0x508e
 #endif
 
 /* Panel Buttons published in /button_state rostopic via Serial */
