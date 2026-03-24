@@ -92,9 +92,10 @@ void LSM6_Init(void)
     // ODR = 1000 (1.66 kHz (high performance)); FS_XL = 00 (245 degree per s)
     SW_I2C_UTIL_WRITE(lsm6_address, LSM6_CTRL2_G, 0x80);
     // ACCELEROMETER + GYRO
-    // 0x04 = 0b00000100
+    // 0x44 = 0b01000100
+    // BDU = 1 (block data update - prevent torn reads between high/low bytes)
     // IF_INC = 1 (automatically increment register address)
-    SW_I2C_UTIL_WRITE(lsm6_address, LSM6_CTRL3_C, 0x04);   
+    SW_I2C_UTIL_WRITE(lsm6_address, LSM6_CTRL3_C, 0x44);
 }
 
 /**
