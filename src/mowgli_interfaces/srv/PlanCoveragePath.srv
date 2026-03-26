@@ -1,6 +1,13 @@
-uint32 area_index
-float32 mow_angle
-float32 mow_width
+# Request
+geometry_msgs/Polygon outer_boundary
+geometry_msgs/Polygon[] obstacles
+float64 mow_angle_deg  # -1 = auto-optimize
+bool skip_outline
 ---
-CoveragePath[] paths
+# Response
 bool success
+string message
+nav_msgs/Path path
+nav_msgs/Path outline_path
+float64 total_distance
+float64 coverage_area
