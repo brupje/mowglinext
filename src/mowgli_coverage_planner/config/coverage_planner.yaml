@@ -1,0 +1,8 @@
+coverage_planner_node:
+  ros__parameters:
+    tool_width: 0.18
+    headland_passes: 2
+    headland_width: 0.18
+    default_mow_angle: -1.0
+    path_spacing: 0.18
+    map_frame: "map"

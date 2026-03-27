@@ -248,8 +248,7 @@ void MapServerNode::on_publish_timer()
     apply_decay(elapsed);
 
     // Publish full grid map
-    auto grid_map_msg = std::make_unique<grid_map_msgs::msg::GridMap>();
-    grid_map::GridMapRosConverter::toMessage(map_, *grid_map_msg);
+    auto grid_map_msg = grid_map::GridMapRosConverter::toMessage(map_);
     grid_map_pub_->publish(std::move(grid_map_msg));
 
     // Publish mow_progress as OccupancyGrid for visualisation

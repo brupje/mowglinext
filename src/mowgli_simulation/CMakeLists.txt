@@ -15,11 +15,11 @@ find_package(ament_cmake REQUIRED)
 # ---------------------------------------------------------------------------
 install(
   DIRECTORY
-    worlds/
-    models/
-    launch/
-    config/
-    rviz/
+    worlds
+    models
+    launch
+    config
+    rviz
   DESTINATION share/${PROJECT_NAME}
 )
 

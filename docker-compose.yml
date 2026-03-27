@@ -79,7 +79,9 @@ services:
     volumes:
       - mowgli_maps:/ros2_ws/maps
     restart: unless-stopped
-    command: ["ros2", "launch", "mowgli_bringup", "simulation.launch.py"]
+    command: >-
+      ros2 launch mowgli_bringup sim_full_system.launch.py
+      headless:=true use_rviz:=false
 
   # --------------------------------------------------------------------------
   # nav — navigation stack only (Nav2 + localisation).

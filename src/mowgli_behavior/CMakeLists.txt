@@ -68,6 +68,10 @@ install(TARGETS behavior_tree_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
 install(DIRECTORY trees/
   DESTINATION share/${PROJECT_NAME}/trees
 )

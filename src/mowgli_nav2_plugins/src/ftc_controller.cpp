@@ -335,7 +335,7 @@ geometry_msgs::msg::TwistStamped FTCController::computeVelocityCommands(
   const double safe_dt = std::min(dt, 0.5);
 
   if (is_crashed_) {
-    throw nav2_core::ControllerException(
+    throw nav2_core::PlannerException(
             "FTCController: robot has crashed / collision detected.");
   }
 
@@ -361,7 +361,7 @@ geometry_msgs::msg::TwistStamped FTCController::computeVelocityCommands(
   // 3. Collision check.
   if (checkCollision(config_.obstacle_lookahead)) {
     is_crashed_ = true;
-    throw nav2_core::ControllerException(
+    throw nav2_core::PlannerException(
             "FTCController: collision detected along lookahead path.");
   }
 
@@ -369,7 +369,7 @@ geometry_msgs::msg::TwistStamped FTCController::computeVelocityCommands(
   calculate_velocity_commands(safe_dt, cmd_vel);
 
   if (is_crashed_) {
-    throw nav2_core::ControllerException(
+    throw nav2_core::PlannerException(
             "FTCController: collision detected during velocity computation.");
   }
 
@@ -616,7 +616,7 @@ void FTCController::update_control_point(double dt)
 
     tf2::doTransform(current_control_point_, local_control_point_, map_to_base);
   } catch (const tf2::TransformException & ex) {
-    throw nav2_core::ControllerException(
+    throw nav2_core::PlannerException(
             std::string("FTCController: TF lookup failed: ") + ex.what());
   }
 

@@ -11,7 +11,7 @@ ROBOT_USER    ?= pi
 GHCR_IMAGE    ?= ghcr.io/$(GITHUB_REPOSITORY)/$(DOCKER_IMAGE)
 
 .PHONY: help build build-debug test clean \
-        docker docker-sim docker-dev \
+        docker docker-build docker-sim docker-dev \
         run-sim run-hardware \
         lint format format-check \
         deploy backup-maps
@@ -73,6 +73,12 @@ clean:
 	rm -rf build/ install/ log/
 
 # ─── Docker ────────────────────────────────────────────────────────────────────
+
+docker-build:
+	docker build --target build \
+	  --build-arg BUILD_TYPE=$(BUILD_TYPE) \
+	  --progress=plain \
+	  -t $(DOCKER_IMAGE)-build:$(DOCKER_TAG) .
 
 docker:
 	docker build --target runtime \

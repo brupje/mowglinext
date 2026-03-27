@@ -35,7 +35,7 @@ public:
     // Shared context
     // ------------------------------------------------------------------
     context_ = std::make_shared<BTContext>();
-    context_->node = shared_from_this();  // set after construction via init()
+    // context_->node is set in init() after shared_from_this() becomes valid.
 
     RCLCPP_INFO(get_logger(), "Initializing mowgli_behavior_node");
   }

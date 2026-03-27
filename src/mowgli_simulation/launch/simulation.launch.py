@@ -23,6 +23,7 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition, UnlessCondition
@@ -33,8 +34,10 @@ from launch.substitutions import (
     FindExecutable,
     LaunchConfiguration,
     PathJoinSubstitution,
+    PythonExpression,
 )
 from launch_ros.actions import Node
+from launch_ros.descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -107,38 +110,31 @@ def generate_launch_description() -> LaunchDescription:
     spawn_yaw = LaunchConfiguration("spawn_yaw")
 
     # ------------------------------------------------------------------
-    # World SDF path — resolve name → absolute path
-    # PathJoinSubstitution handles both a bare name and an absolute path
-    # gracefully when the caller passes a full path.
+    # 1. Gazebo Ignition (via OpaqueFunction to resolve world path at runtime)
     # ------------------------------------------------------------------
-    world_sdf = PathJoinSubstitution(
-        [FindPackageShare("mowgli_simulation"), "worlds", [world, ".sdf"]]
-    )
+    def launch_gazebo(context):
+        world_name = LaunchConfiguration("world").perform(context)
+        is_headless = LaunchConfiguration("headless").perform(context).lower()
 
-    # ------------------------------------------------------------------
-    # 1. Gazebo Ignition
-    #    -r  : run simulation on start
-    #    -v4 : verbose level 4 (info)
-    #    The conditional flag --headless-rendering is appended for CI.
-    # ------------------------------------------------------------------
-    gz_args_with_gui = ["-r -v3 ", world_sdf]
-    gz_args_headless = ["-r -v3 -s ", world_sdf]
+        # Resolve world SDF path
+        world_sdf = os.path.join(sim_share, "worlds", world_name + ".sdf")
+        if not os.path.isfile(world_sdf):
+            # Assume it's an absolute path
+            world_sdf = world_name
 
-    gazebo_with_gui = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(gz_sim_share, "launch", "gz_sim.launch.py")
-        ),
-        launch_arguments={"gz_args": gz_args_with_gui}.items(),
-        condition=UnlessCondition(headless),
-    )
+        server_only = " -s " if is_headless == "true" else " "
+        gz_args = f"-r -v3{server_only}{world_sdf}"
 
-    gazebo_headless = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(gz_sim_share, "launch", "gz_sim.launch.py")
-        ),
-        launch_arguments={"gz_args": gz_args_headless}.items(),
-        condition=IfCondition(headless),
-    )
+        return [
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(gz_sim_share, "launch", "gz_sim.launch.py")
+                ),
+                launch_arguments={"gz_args": gz_args}.items(),
+            )
+        ]
+
+    gazebo_launch = OpaqueFunction(function=launch_gazebo)
 
     # ------------------------------------------------------------------
     # 2. robot_state_publisher — publishes /robot_description and static TF
@@ -156,7 +152,7 @@ def generate_launch_description() -> LaunchDescription:
         name="robot_state_publisher",
         output="screen",
         parameters=[
-            {"robot_description": robot_description_content},
+            {"robot_description": ParameterValue(robot_description_content, value_type=str)},
             {"use_sim_time": True},
         ],
     )
@@ -203,6 +199,40 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
+    # 4b. Static TF: lidar_link → Gazebo sensor frame (identity)
+    #     Gazebo Ignition names sensor frames as "model/link/sensor".
+    #     The URDF provides base_link→lidar_link. This identity bridge
+    #     lets SLAM/Nav2 resolve the Gazebo scan frame back to base_link.
+    # ------------------------------------------------------------------
+    gz_lidar_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="gz_lidar_frame_bridge",
+        output="screen",
+        arguments=[
+            "--x", "0", "--y", "0", "--z", "0",
+            "--roll", "0", "--pitch", "0", "--yaw", "0",
+            "--frame-id", "lidar_link",
+            "--child-frame-id", "mowgli_mower/laser_link/lidar_sensor",
+        ],
+        parameters=[{"use_sim_time": True}],
+    )
+
+    gz_imu_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="gz_imu_frame_bridge",
+        output="screen",
+        arguments=[
+            "--x", "0", "--y", "0", "--z", "0",
+            "--roll", "0", "--pitch", "0", "--yaw", "0",
+            "--frame-id", "imu_link",
+            "--child-frame-id", "mowgli_mower/base_link/imu_sensor",
+        ],
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # ------------------------------------------------------------------
     # 5. RViz2 — optional, started after spawner exits
     # ------------------------------------------------------------------
     rviz_config = os.path.join(sim_share, "rviz", "mowgli_sim.rviz")
@@ -239,11 +269,12 @@ def generate_launch_description() -> LaunchDescription:
             spawn_z_arg,
             spawn_yaw_arg,
             # Nodes / includes
-            gazebo_with_gui,
-            gazebo_headless,
+            gazebo_launch,
             robot_state_publisher_node,
             spawn_mower_node,
             bridge_node,
+            gz_lidar_tf,
+            gz_imu_tf,
             rviz_after_spawn,
         ]
     )

@@ -44,8 +44,8 @@ def generate_launch_description() -> LaunchDescription:
 
     slam_arg = DeclareLaunchArgument(
         "slam",
-        default_value="true",
-        description="Run slam_toolbox when true; skip when using a pre-built map.",
+        default_value="True",
+        description="Run slam_toolbox when True; skip when using a pre-built map.",
     )
 
     map_yaml_arg = DeclareLaunchArgument(
@@ -54,12 +54,19 @@ def generate_launch_description() -> LaunchDescription:
         description="Absolute path to a pre-built map yaml file (used when slam=false).",
     )
 
+    use_ekf_arg = DeclareLaunchArgument(
+        "use_ekf",
+        default_value="True",
+        description="Run dual EKF nodes. Set to False in simulation where Gazebo provides odom TF.",
+    )
+
     # ------------------------------------------------------------------
     # Resolved substitutions
     # ------------------------------------------------------------------
     use_sim_time = LaunchConfiguration("use_sim_time")
     slam = LaunchConfiguration("slam")
     map_yaml = LaunchConfiguration("map")
+    use_ekf = LaunchConfiguration("use_ekf")
 
     # ------------------------------------------------------------------
     # Config paths
@@ -87,6 +94,7 @@ def generate_launch_description() -> LaunchDescription:
     # 2. robot_localization – odom EKF
     # ------------------------------------------------------------------
     ekf_odom_node = Node(
+        condition=IfCondition(use_ekf),
         package="robot_localization",
         executable="ekf_node",
         name="ekf_odom",
@@ -100,6 +108,7 @@ def generate_launch_description() -> LaunchDescription:
 
     # 3. robot_localization – map EKF
     ekf_map_node = Node(
+        condition=IfCondition(use_ekf),
         package="robot_localization",
         executable="ekf_node",
         name="ekf_map",
@@ -121,8 +130,10 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "use_sim_time": use_sim_time,
             "params_file": nav2_params,
-            # Pass map only when not running slam
-            "slam": slam,
+            # We run our own slam_toolbox node (async), so always tell Nav2
+            # to not start its own SLAM. When slam=False on our side, we
+            # provide a pre-built map via the map argument.
+            "slam": "False",
             "map": map_yaml,
         }.items(),
     )
@@ -135,6 +146,7 @@ def generate_launch_description() -> LaunchDescription:
             use_sim_time_arg,
             slam_arg,
             map_yaml_arg,
+            use_ekf_arg,
             slam_toolbox_node,
             ekf_odom_node,
             ekf_map_node,

@@ -44,8 +44,8 @@ def generate_launch_description() -> LaunchDescription:
     # ------------------------------------------------------------------
     slam_arg = DeclareLaunchArgument(
         "slam",
-        default_value="true",
-        description="Run slam_toolbox when true; skip when using a pre-built map.",
+        default_value="True",
+        description="Run slam_toolbox when True; skip when using a pre-built map.",
     )
 
     map_arg = DeclareLaunchArgument(
@@ -56,8 +56,20 @@ def generate_launch_description() -> LaunchDescription:
 
     world_arg = DeclareLaunchArgument(
         "world",
-        default_value="",
-        description="Path to a Gazebo world file. Defaults to simulation package default.",
+        default_value="garden",
+        description="Gazebo world name (garden, empty_garden) or path to SDF.",
+    )
+
+    headless_arg = DeclareLaunchArgument(
+        "headless",
+        default_value="true",
+        description="Run Gazebo in headless mode (no GUI).",
+    )
+
+    use_rviz_arg = DeclareLaunchArgument(
+        "use_rviz",
+        default_value="false",
+        description="Launch RViz2.",
     )
 
     # ------------------------------------------------------------------
@@ -67,6 +79,8 @@ def generate_launch_description() -> LaunchDescription:
     slam = LaunchConfiguration("slam")
     map_yaml = LaunchConfiguration("map")
     world = LaunchConfiguration("world")
+    headless = LaunchConfiguration("headless")
+    use_rviz = LaunchConfiguration("use_rviz")
 
     # ------------------------------------------------------------------
     # Config paths
@@ -84,8 +98,9 @@ def generate_launch_description() -> LaunchDescription:
             os.path.join(simulation_dir, "launch", "simulation.launch.py")
         ),
         launch_arguments={
-            "use_sim_time": "true",
             "world": world,
+            "headless": headless,
+            "use_rviz": use_rviz,
         }.items(),
     )
 
@@ -100,6 +115,7 @@ def generate_launch_description() -> LaunchDescription:
             "use_sim_time": "true",
             "slam": slam,
             "map": map_yaml,
+            "use_ekf": "False",
         }.items(),
     )
 
@@ -168,6 +184,8 @@ def generate_launch_description() -> LaunchDescription:
             slam_arg,
             map_arg,
             world_arg,
+            headless_arg,
+            use_rviz_arg,
             # Subsystem includes
             simulation_launch,
             navigation_launch,

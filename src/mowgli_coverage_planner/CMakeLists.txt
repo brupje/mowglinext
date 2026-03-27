@@ -82,6 +82,11 @@ ament_target_dependencies(coverage_planner_node
 # ---------------------------------------------------------------------------
 
 install(
+  DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
   DIRECTORY include/
   DESTINATION include
 )

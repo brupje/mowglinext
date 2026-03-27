@@ -110,13 +110,13 @@ TEST_F(OscillationDetectorTest, AlternatingAngularZeroLinearIsOscillating)
 
 // ── Test: large v_eps prevents oscillation detection ─────────────────────────
 
-TEST_F(OscillationDetectorTest, LargeEpsThresholdDoesNotOscillate)
+TEST_F(OscillationDetectorTest, TinyEpsThresholdDoesNotOscillate)
 {
   detector_.setBufferLength(10);
 
-  // Same alternating pattern but v_eps and omega_eps are very large (> 1.0)
-  // so the means will always be below the threshold.
-  pushAlternating(10, 0.0, 0.9, 2.0 /*v_eps*/, 2.0 /*omega_eps*/);
+  // Same alternating pattern but v_eps and omega_eps are very small (< normalised means).
+  // With v=0.5 (normalised 0.5), v_eps=0.01 => |0.5| < 0.01 is false => not oscillating.
+  pushAlternating(10, 0.5, 0.9, 0.01 /*v_eps*/, 0.01 /*omega_eps*/);
 
   EXPECT_FALSE(detector_.isOscillating());
 }

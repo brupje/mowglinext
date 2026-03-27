@@ -183,10 +183,11 @@ TEST(CobsTest, KnownVector_NonZeros)
   EXPECT_EQ(encoded[3], 0x33u);
 }
 
-TEST(CobsTest, DecodeRejectsZeroByte)
+TEST(CobsTest, DecodeRejectsZeroCodeByte)
 {
-  // A 0x00 in the middle of a COBS stream is invalid; decoder must return 0.
-  const std::vector<uint8_t> bad_input = {0x02, 0x00, 0x01};
+  // A 0x00 at a code-byte position is invalid; decoder must return 0.
+  // Position 0 is a code byte: a zero there is invalid.
+  const std::vector<uint8_t> bad_input = {0x00, 0x01, 0x01};
   std::vector<uint8_t> out(bad_input.size());
   const std::size_t result = cobs_decode(bad_input.data(), bad_input.size(), out.data());
   EXPECT_EQ(result, 0u);

@@ -349,9 +349,10 @@ BT::NodeStatus PlanCoveragePath::tick()
   }
 
   auto request = std::make_shared<mowgli_interfaces::srv::PlanCoveragePath::Request>();
-  request->area_index = area_index;
-  request->mow_angle  = 0.0f;
-  request->mow_width  = 0.2f;
+  // The outer_boundary polygon should be set by the caller via blackboard;
+  // for now we send an empty polygon and let the planner use stored area data.
+  request->mow_angle_deg = -1.0;  // auto-optimize
+  request->skip_outline  = false;
 
   auto future = client_->async_send_request(request);
 
