@@ -61,27 +61,52 @@ services:
   # simulation — Gazebo headless + Nav2 running against the simulated robot.
   # Port 8080 is exposed for the Gazebo web client (gz-web).
   # --------------------------------------------------------------------------
+  # --------------------------------------------------------------------------
+  # simulation — Headless Gazebo + full nav stack + Foxglove bridge.
+  # Connect Foxglove Studio to ws://localhost:8765
+  # --------------------------------------------------------------------------
   simulation:
     container_name: mowgli_simulation
-    image: mowgli-ros2:simulation
+    image: mowgli-ros2-sim:latest
     build:
       context: .
       dockerfile: Dockerfile
       target: simulation
     environment:
       <<: *ros-env
-      # Run Gazebo in headless/server mode
       DISPLAY: ""
       LIBGL_ALWAYS_SOFTWARE: "1"
-    network_mode: host
     ports:
-      - "8080:8080"
+      - "9090:9090"   # Rosbridge WebSocket (Foxglove connects here)
     volumes:
       - mowgli_maps:/ros2_ws/maps
     restart: unless-stopped
     command: >-
       ros2 launch mowgli_bringup sim_full_system.launch.py
       headless:=true use_rviz:=false
+
+  # --------------------------------------------------------------------------
+  # simulation-gui — Same as above but with Gazebo GUI via noVNC.
+  # Open http://localhost:6080/vnc.html for the Gazebo window.
+  # Connect Foxglove Studio to ws://localhost:8765
+  # --------------------------------------------------------------------------
+  simulation-gui:
+    container_name: mowgli_simulation_gui
+    image: mowgli-ros2-sim:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: simulation
+    environment:
+      <<: *ros-env
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    ports:
+      - "9090:9090"   # Rosbridge WebSocket (Foxglove connects here)
+      - "6080:6080"   # noVNC web client
+    volumes:
+      - mowgli_maps:/ros2_ws/maps
+    restart: unless-stopped
+    entrypoint: ["/ros2_ws/scripts/start_vnc.sh"]
 
   # --------------------------------------------------------------------------
   # nav — navigation stack only (Nav2 + localisation).

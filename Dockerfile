@@ -142,10 +142,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros-gz-sim \
     ros-humble-ros-gz-bridge \
     ros-humble-ros-gz-interfaces \
-    # Web bridge for Gazebo web client (port 8080)
-    libwebsockets-dev \
+    # VNC + lightweight desktop for Gazebo GUI access from macOS
+    tigervnc-standalone-server \
+    tigervnc-common \
+    novnc \
+    websockify \
+    openbox \
+    xterm \
+    x11-utils \
  && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 8080
+# Copy VNC startup script
+COPY scripts/start_vnc.sh /ros2_ws/scripts/start_vnc.sh
+RUN chmod +x /ros2_ws/scripts/start_vnc.sh
+
+# Copy Foxglove layout for easy import
+COPY foxglove/ /ros2_ws/foxglove/
+
+# Rosbridge WebSocket port (Foxglove connects here)
+EXPOSE 9090
+# noVNC web port (Gazebo GUI via browser)
+EXPOSE 6080
 
 CMD ["ros2", "launch", "mowgli_bringup", "sim_full_system.launch.py", "headless:=true", "use_rviz:=false"]

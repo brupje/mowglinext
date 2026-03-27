@@ -176,6 +176,35 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
+    # 7. Rosbridge WebSocket — allows Foxglove Studio to connect
+    #    Foxglove Studio supports rosbridge protocol natively.
+    #    Connect via: ws://localhost:9090 (Rosbridge protocol)
+    # ------------------------------------------------------------------
+    rosbridge_node = Node(
+        package="rosbridge_server",
+        executable="rosbridge_websocket",
+        name="rosbridge_websocket",
+        output="screen",
+        parameters=[
+            {
+                "port": 9090,
+                "address": "",
+                "use_sim_time": True,
+                "unregister_timeout": 10.0,
+                "send_action_goals_in_order": True,
+            },
+        ],
+    )
+
+    rosapi_node = Node(
+        package="rosapi",
+        executable="rosapi_node",
+        name="rosapi",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
+    # ------------------------------------------------------------------
     # LaunchDescription
     # ------------------------------------------------------------------
     return LaunchDescription(
@@ -194,5 +223,7 @@ def generate_launch_description() -> LaunchDescription:
             map_server_node,
             coverage_planner_node,
             diagnostics_node,
+            rosbridge_node,
+            rosapi_node,
         ]
     )

@@ -1,0 +1,231 @@
+{
+  "configById": {
+    "3d!main": {
+      "followTf": "base_link",
+      "scene": {
+        "labelScaleFactor": 1,
+        "enableStats": false,
+        "backgroundColor": "#1a1a2e",
+        "transforms": {
+          "axisScale": 0.3,
+          "lineWidth": 0.01,
+          "editable": false,
+          "enablePreloading": false
+        }
+      },
+      "cameraState": {
+        "distance": 12,
+        "perspective": true,
+        "phi": 55,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.01,
+        "far": 500
+      },
+      "topics": {
+        "/scan": {
+          "visible": true,
+          "pointSize": 3,
+          "colorMode": "flat",
+          "flatColor": "#ff3333",
+          "decayTime": 0
+        },
+        "/map": {
+          "visible": true,
+          "alpha": 0.7,
+          "unknownColor": "#1a1a2e"
+        },
+        "/local_costmap/costmap": {
+          "visible": true,
+          "alpha": 0.4
+        },
+        "/global_costmap/costmap": {
+          "visible": false,
+          "alpha": 0.3
+        },
+        "/robot_description": {
+          "visible": true
+        },
+        "/coverage_planner_node/coverage_path": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.02
+        },
+        "/coverage_planner_node/coverage_outline": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.03
+        },
+        "/plan": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.03
+        },
+        "/local_plan": {
+          "visible": true,
+          "type": "line",
+          "lineWidth": 0.04
+        }
+      },
+      "publish": {
+        "type": "pose_estimate",
+        "poseTopic": "/initialpose",
+        "pointTopic": "/clicked_point",
+        "poseEstimateThetaDeviation": 0.26179939
+      }
+    },
+    "RawMessages!scan": {
+      "topicPath": "/scan",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false
+    },
+    "Teleop!teleop": {
+      "topic": "/cmd_vel",
+      "publishRate": 10,
+      "upButton": {"field": "linear-x", "value": 0.3},
+      "downButton": {"field": "linear-x", "value": -0.3},
+      "leftButton": {"field": "angular-z", "value": 0.5},
+      "rightButton": {"field": "angular-z", "value": -0.5}
+    },
+    "Plot!battery": {
+      "paths": [
+        {
+          "value": "/hardware_bridge/power.v_battery",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "Battery (V)",
+          "color": "#4e98e2",
+          "showLine": true
+        },
+        {
+          "value": "/hardware_bridge/power.v_charge",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "Charger (V)",
+          "color": "#2ecc71",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "title": "Power"
+    },
+    "Plot!velocity": {
+      "paths": [
+        {
+          "value": "/cmd_vel.linear.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "cmd_vel linear.x",
+          "color": "#e74c3c",
+          "showLine": true
+        },
+        {
+          "value": "/cmd_vel.angular.z",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "cmd_vel angular.z",
+          "color": "#3498db",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "title": "Velocity Commands"
+    },
+    "Diagnostics!diag": {
+      "minLevel": 0,
+      "pinnedIds": [],
+      "splitFraction": 0.5,
+      "topicToRender": "/diagnostics",
+      "sortByLevel": false
+    },
+    "Log!rosout": {
+      "searchTerms": [],
+      "minLogLevel": 2,
+      "nameFilter": {}
+    },
+    "StateTransitions!bt": {
+      "paths": [
+        {
+          "value": "/behavior_tree_node/high_level_status.state",
+          "label": "BT State",
+          "timestampMethod": "receiveTime"
+        }
+      ]
+    },
+    "TopicGraph!graph": {
+      "lrOrientation": true,
+      "showServices": false,
+      "showActions": false,
+      "edgeLabelMode": "topic"
+    },
+    "Indicator!slam": {
+      "path": "/map",
+      "style": "background",
+      "fallbackColor": "#444444",
+      "fallbackLabel": "SLAM",
+      "rules": [
+        {
+          "operator": "true",
+          "rawValue": "",
+          "color": "#2ecc71",
+          "label": "SLAM Active"
+        }
+      ]
+    }
+  },
+  "globalVariables": {},
+  "layout": {
+    "first": {
+      "first": "3d!main",
+      "second": {
+        "first": "Teleop!teleop",
+        "second": "Indicator!slam",
+        "direction": "column",
+        "splitPercentage": 80
+      },
+      "direction": "row",
+      "splitPercentage": 80
+    },
+    "second": {
+      "first": {
+        "first": "Plot!velocity",
+        "second": "Plot!battery",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "second": {
+        "first": "Diagnostics!diag",
+        "second": "Log!rosout",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "direction": "column",
+      "splitPercentage": 50
+    },
+    "direction": "column",
+    "splitPercentage": 65
+  },
+  "playbackConfig": {
+    "speed": 1
+  },
+  "userNodes": {},
+  "version": 1
+}

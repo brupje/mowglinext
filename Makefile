@@ -12,7 +12,7 @@ GHCR_IMAGE    ?= ghcr.io/$(GITHUB_REPOSITORY)/$(DOCKER_IMAGE)
 
 .PHONY: help build build-debug test clean \
         docker docker-build docker-sim docker-dev \
-        run-sim run-hardware \
+        run-sim run-sim-gui run-hardware foxglove \
         lint format format-check \
         deploy backup-maps
 
@@ -31,8 +31,10 @@ help:
 	@echo "  docker         Build production Docker image (runtime stage)"
 	@echo "  docker-sim     Build simulation Docker image"
 	@echo "  docker-dev     Build development Docker image"
-	@echo "  run-sim        Run simulation stack via docker compose"
+	@echo "  run-sim        Run headless simulation (connect Foxglove to ws://localhost:9090)"
+	@echo "  run-sim-gui    Run simulation with Gazebo GUI via noVNC (http://localhost:6080/vnc.html)"
 	@echo "  run-hardware   Run hardware stack via docker compose"
+	@echo "  foxglove       Open Foxglove Studio with the Mowgli layout"
 	@echo ""
 	@echo "Code quality:"
 	@echo "  lint           Run cppcheck + cpplint on all C++ sources"
@@ -95,10 +97,30 @@ docker-dev:
 	  -t $(DOCKER_IMAGE)-dev:$(DOCKER_TAG) .
 
 run-sim:
+	@echo "Starting headless simulation..."
+	@echo "  Foxglove Studio: ws://localhost:9090"
+	@echo "  Import layout:   foxglove/mowgli_sim.json"
+	@echo ""
 	docker compose up simulation
+
+run-sim-gui:
+	@echo "Starting simulation with Gazebo GUI..."
+	@echo "  Gazebo GUI:      http://localhost:6080/vnc.html"
+	@echo "  Foxglove Studio: ws://localhost:9090"
+	@echo ""
+	docker compose up simulation-gui
 
 run-hardware:
 	docker compose up mowgli
+
+foxglove:
+	@echo "Opening Foxglove Studio..."
+	@echo "Make sure to connect to ws://localhost:9090 (Rosbridge)"
+	@echo "Import the layout from foxglove/mowgli_sim.json"
+	@open -a "Foxglove Studio" 2>/dev/null || \
+	  (echo "Foxglove Studio not found. Install from https://foxglove.dev/download" && \
+	   echo "Or use the web version: https://app.foxglove.dev" && \
+	   open "https://app.foxglove.dev/?ds=rosbridge-websocket&ds.url=ws%3A%2F%2Flocalhost%3A9090")
 
 # ─── Code Quality ──────────────────────────────────────────────────────────────
 
