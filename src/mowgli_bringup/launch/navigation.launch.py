@@ -18,12 +18,14 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
 )
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -86,25 +88,36 @@ def generate_launch_description() -> LaunchDescription:
     # Config paths
     # ------------------------------------------------------------------
     slam_toolbox_params = os.path.join(bringup_dir, "config", "slam_toolbox.yaml")
+    slam_toolbox_dir = get_package_share_directory("slam_toolbox")
     localization_params = os.path.join(bringup_dir, "config", "localization.yaml")
-    nav2_params = os.path.join(bringup_dir, "config", "nav2_params.yaml")
+    nav2_params_file = os.path.join(bringup_dir, "config", "nav2_params.yaml")
+
+    # Rewrite use_sim_time throughout nav2_params.yaml so that all Nav2 nodes
+    # use the correct clock source.  Nav2's navigation_launch.py does NOT
+    # inject use_sim_time into the params file automatically.
+    nav2_params = RewrittenYaml(
+        source_file=nav2_params_file,
+        root_key="",
+        param_rewrites={"use_sim_time": use_sim_time},
+        convert_types=True,
+    )
 
     # ------------------------------------------------------------------
     # 1. slam_toolbox  (only when slam=true)
+    #    Uses the official launch file which handles lifecycle auto-activation.
     # ------------------------------------------------------------------
-    slam_toolbox_node = Node(
+    slam_toolbox_launch = GroupAction(
         condition=IfCondition(slam),
-        package="slam_toolbox",
-        executable="async_slam_toolbox_node",
-        name="slam_toolbox",
-        output="screen",
-        parameters=[
-            slam_toolbox_params,
-            {
-                "use_sim_time": use_sim_time,
-                "mode": slam_mode,
-                "map_file_name": map_file_name,
-            },
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(slam_toolbox_dir, "launch", "online_async_launch.py")
+                ),
+                launch_arguments={
+                    "use_sim_time": use_sim_time,
+                    "slam_params_file": slam_toolbox_params,
+                }.items(),
+            ),
         ],
     )
 
@@ -165,7 +178,7 @@ def generate_launch_description() -> LaunchDescription:
             use_ekf_arg,
             slam_mode_arg,
             map_file_arg,
-            slam_toolbox_node,
+            slam_toolbox_launch,
             ekf_odom_node,
             ekf_map_node,
             nav2_navigation,

@@ -321,7 +321,7 @@ void FTCController::setSpeedLimit(const double & speed_limit, const bool & perce
 geometry_msgs::msg::TwistStamped FTCController::computeVelocityCommands(
   const geometry_msgs::msg::PoseStamped & pose,
   const geometry_msgs::msg::Twist & /*velocity*/,
-  nav2_core::GoalChecker * /*goal_checker*/)
+  nav2_core::GoalChecker * goal_checker)
 {
   geometry_msgs::msg::TwistStamped cmd_vel;
   cmd_vel.header.frame_id = "base_link";
@@ -344,16 +344,33 @@ geometry_msgs::msg::TwistStamped FTCController::computeVelocityCommands(
     return cmd_vel;
   }
 
+  // Reset the Nav2 goal checker so it re-evaluates from scratch each cycle.
+  // This prevents stateful goal checkers from latching a spurious "reached"
+  // before the FTC state machine has finished following the path.
+  if (goal_checker) {
+    goal_checker->reset();
+  }
+
   // 1. Advance the carrot; compute lat/lon/angle errors in base_link.
   update_control_point(safe_dt);
+
+  RCLCPP_INFO_THROTTLE(logger_, *clock_, 2000,
+    "FTCController: state=%d idx=%zu/%zu dt=%.4f "
+    "lat=%.3f lon=%.3f ang=%.3f(deg=%.1f) pos=(%.2f,%.2f)",
+    static_cast<int>(current_state_), current_index_, global_plan_.size(),
+    safe_dt, lat_error_, lon_error_, angle_error_,
+    angle_error_ * 180.0 / M_PI,
+    local_control_point_.translation().x(),
+    local_control_point_.translation().y());
 
   // 2. Update the state machine.
   const PlannerState new_state = update_planner_state();
   if (new_state != current_state_) {
     RCLCPP_INFO(
       logger_,
-      "FTCController: state transition %d -> %d.",
-      static_cast<int>(current_state_), static_cast<int>(new_state));
+      "FTCController: state transition %d -> %d (idx=%zu, angle_err=%.3f deg).",
+      static_cast<int>(current_state_), static_cast<int>(new_state),
+      current_index_, angle_error_ * 180.0 / M_PI);
     state_entered_time_ = clock_->now();
     current_state_ = new_state;
   }
@@ -622,8 +639,10 @@ void FTCController::update_control_point(double dt)
 
   lat_error_   = local_control_point_.translation().y();
   lon_error_   = local_control_point_.translation().x();
-  // Extract yaw from rotation matrix.
-  angle_error_ = local_control_point_.rotation().eulerAngles(0, 1, 2).z();
+  // Extract yaw from rotation matrix using atan2 (reliable for 2D, unlike
+  // Eigen::eulerAngles which can give ambiguous results near singularities).
+  const Eigen::Matrix3d & rot = local_control_point_.rotation();
+  angle_error_ = std::atan2(rot(1, 0), rot(0, 0));
 }
 
 // ── PID velocity computation ──────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Mowgli ROS2
 
-A complete rewrite of the [OpenMower](https://github.com/ClemensElflein/open_mower_ros) autonomous lawn mower in ROS2 Humble, featuring modern navigation, SLAM-based mapping, and behavior tree control.
+A complete rewrite of the [OpenMower](https://github.com/ClemensElflein/open_mower_ros) autonomous lawn mower in ROS2 Jazzy, featuring modern navigation, SLAM-based mapping, behavior tree control, and advanced coverage path planning.
 
 ## Overview
 
@@ -13,11 +13,13 @@ The system maintains the proven hardware platform (Raspberry Pi 4, STM32 firmwar
 - **LiDAR SLAM** - Real-time mapping and localization using SLAM Toolbox with outdoor optimization
 - **RTK-GPS Fusion** - Dual Extended Kalman Filter (EKF) architecture combining wheel odometry, IMU, and RTK-GPS for accurate outdoor positioning
 - **Nav2 Integration** - Industrial-grade navigation stack with dynamic costmaps and path planning
-- **Custom FTC Controller** - Follow-The-Carrot local planner ported from ROS1, optimized for lawn mowing with PID-based motion control
-- **Behavior Trees** - Reactive, composable control logic using BehaviorTree.CPP v4
+- **Coverage Path Planning** - Fields2Cover v2 integration for optimal boustrophedon patterns with configurable swath angles and Dubins turn optimization
+- **Dual Controller Architecture** - RPP (Regulated Pure Pursuit) with RotationShimController for transit/docking, FTC (Follow-The-Carrot) for coverage paths
+- **Behavior Trees** - Reactive, composable control logic using BehaviorTree.CPP v4 with path-indexed state machine for coverage execution
 - **COBS Serial Protocol** - Robust binary communication with STM32 firmware (Consistent Overhead Byte Stuffing with CRC-16 error detection)
 - **Hardware Bridge** - Single USB serial interface abstracting all firmware interactions
-- **Modular Architecture** - 6 focused packages with clear responsibilities and minimal coupling
+- **Foxglove Integration** - Real-time visualization via Foxglove Studio (ws://localhost:8765)
+- **Modular Architecture** - 9 focused packages with clear responsibilities and minimal coupling
 
 ## System Architecture
 
@@ -60,17 +62,21 @@ mowgli_interfaces (messages, services, actions)
 mowgli_hardware (COBS bridge to STM32)
     ↓
 mowgli_localization (odometry, GPS fusion, monitoring)
-    mowgli_bringup (URDF, Nav2 config, launch files)
-    mowgli_nav2_plugins (FTC controller plugin)
-    mowgli_behavior (BehaviorTree nodes & main control)
+mowgli_map (map server, boundary/zone management)
+mowgli_bringup (URDF, Nav2 config, launch files)
+mowgli_nav2_plugins (RPP & FTC controller plugins)
+mowgli_coverage_planner (Fields2Cover v2 coverage path planning)
+mowgli_behavior (BehaviorTree nodes & main control)
+mowgli_monitoring (diagnostics, health monitoring, MQTT bridge)
+mowgli_simulation (Gazebo Harmonic simulation assets)
     ↓
-Application / Remote Control
+Application / Remote Control / Foxglove Studio
 ```
 
 ## Hardware Requirements
 
 ### Computing Platform
-- **Raspberry Pi 4** (4GB+ recommended) running Ubuntu 22.04 + ROS2 Humble
+- **Raspberry Pi 4** (4GB+ recommended) running Ubuntu 24.04 + ROS2 Jazzy
 
 ### Mower Hardware
 - **STM32-based Mowgli board** with USB CDC serial interface
@@ -93,7 +99,7 @@ Application / Remote Control
 ### 1. Building from Source
 
 #### Prerequisites
-- **ROS2 Humble** installed on Ubuntu 22.04
+- **ROS2 Jazzy** installed on Ubuntu 24.04
 - **colcon** build tool (`sudo apt install python3-colcon-common-extensions`)
 - Standard build tools: `gcc`, `cmake`, `git`
 
@@ -125,20 +131,62 @@ This brings up:
 - Localization (wheel odometry + IMU fusion)
 - Behavior tree controller
 
-### 3. Launching Simulation (Gazebo Ignition)
+### 3. Launching Simulation (Gazebo Harmonic)
 
+#### Option A: GUI Simulation with noVNC
+
+```bash
+make docker-sim
+make run-sim-gui
+```
+
+Visit http://localhost:6080/vnc.html to view the Gazebo GUI. Foxglove Studio is available at ws://localhost:8765.
+
+#### Option B: Development Simulation
+
+```bash
+make dev-sim
+```
+
+Then in the container:
 ```bash
 ros2 launch mowgli_bringup simulation.launch.py
 ```
 
-This spawns a virtual Mowgli in an empty Gazebo world with:
+This spawns a virtual Mowgli in a Gazebo Harmonic world with:
 - Simulated sensors (LiDAR, IMU, wheel odometry)
 - Physics-based motor and blade control
 - ROS2 ↔ Gazebo bridging for sensor data and commands
+- Foxglove Bridge for real-time visualization
 
-### 4. Docker Deployment
+### 4. Docker Development Workflow
 
-Build and run the full stack in a Docker container:
+The Makefile provides convenient development targets:
+
+```bash
+# Build Docker image for simulation
+make docker-sim
+
+# Run simulation with GUI (noVNC at http://localhost:6080/vnc.html)
+make run-sim-gui
+
+# Development shell with all build dependencies
+make dev-shell
+
+# Build individual package in dev container
+make dev-build-pkg PACKAGE=mowgli_behavior
+
+# Rebuild entire workspace in dev container
+make dev-build
+
+# Restart dev container
+make dev-restart
+
+# Full development simulation (no GUI, ROS2 commands available)
+make dev-sim
+```
+
+Or use docker-compose directly:
 ```bash
 docker compose build
 docker compose up simulation    # For simulation testing
@@ -216,12 +264,19 @@ Key types:
 - `config/slam_toolbox.yaml` – Outdoor SLAM tuning (loop closure, map update rates)
 - `config/twist_mux.yaml` – Priority multiplexing of navigation, teleoperation, and emergency commands
 - `launch/mowgli.launch.py` – Main real-hardware bringup
-- `launch/simulation.launch.py` – Gazebo Ignition simulation
+- `launch/simulation.launch.py` – Gazebo Harmonic simulation
 
 ### mowgli_nav2_plugins
-**Custom Nav2 controller plugin** implementing the Follow-The-Carrot algorithm.
+**Custom Nav2 controller plugins** for navigation and coverage path following.
 
-**FTCController:**
+**RPPController (Regulated Pure Pursuit):**
+- Used for transit to waypoints and docking navigation
+- Wrapped in RotationShimController for initial heading alignment
+- Smooth, stable control for general-purpose navigation
+- Integrates with standard Nav2 goalchecker framework
+
+**FTCController (Follow-The-Carrot):**
+- Specialized for coverage path execution with path-indexed state machine
 - **5-State FSM:** Pre-Rotate → Forward → Approach → Stop → Oscillation Recovery
 - **3-Channel PID:** Independent control of linear velocity, angular velocity, and acceleration
 - **Path Interpolation:** SLERP-based carrot point following for smooth curves
@@ -229,23 +284,78 @@ Key types:
 - **Oscillation Detection:** Reactive recovery when the robot becomes trapped
 - **Tuned for Lawn Mowing:** Handles the unique dynamics of slow, heavy outdoor vehicles
 
+**Custom Navigate-To-Pose Behavior Tree XML:**
+- `navigate_to_pose.xml` with GoalCheckerSelector for multiple goal validation strategies
+- Seamless switching between RPP (transit) and FTC (coverage) controllers
+
+### mowgli_coverage_planner
+**Fields2Cover v2 integration for optimal coverage path planning**.
+
+**Service Provided:**
+- `~/plan_coverage` (PlanCoverage action) – Accepts boundary polygon, zone inclusion/exclusion, desired swath width, and returns coverage waypoint path
+
+**Features:**
+- **Boustrophedon (parallel line) pattern generation** – Optimal lawn coverage with configurable swath angles
+- **Dubins turn optimization** – Smooth curved transitions between mowing lines minimizing non-productive movement
+- **Zone-based planning** – Supports inclusion/exclusion zones for obstacles and areas of interest
+- **Real-time planning** – Generates optimal path in seconds even for large properties
+- **Swath angle optimization** – Automatically or manually sets the best mowing direction for field shape
+
+**Typical Usage (from behavior tree):**
+```cpp
+PlanCoveragePath(boundary, zone_config) → waypoint_list
+```
+
+### mowgli_map
+**Map server and boundary/zone management** for coverage planning context.
+
+**Nodes:**
+- `map_server_node` – Loads boundary map and zone definitions from saved files
+- Publishes map metadata for coverage planner
+
+**Configuration:**
+- Boundary polygon (polygon from map file or GPS-defined)
+- Inclusion/exclusion zones with penalty costs
+- Saved coverage sessions for replay and analysis
+
+### mowgli_monitoring
+**System health monitoring, diagnostics, and MQTT integration**.
+
+**Nodes:**
+1. **diagnostics_node**
+   - Monitors EKF health, battery voltage trends, motor encoder faults
+   - Publishes diagnostic_msgs/DiagnosticArray to aggregator
+   - Detects 5 degradation modes: stale odometry, GPS timeout, filter divergence, motor stall, battery fault
+
+2. **mqtt_bridge_node**
+   - Forwards selected topics to MQTT broker for remote monitoring
+   - Publishes: battery voltage, charging status, mowing progress, error codes
+   - Subscribes to remote control commands if needed
+
+**Published Topics:**
+- `~/diagnostics` (diagnostic_msgs/DiagnosticArray) – System health status
+- (MQTT) Battery voltage, mower mode, GPS quality, error codes
+
 ### mowgli_behavior
-**High-level control logic** using BehaviorTree.CPP v4.
+**High-level control logic** using BehaviorTree.CPP v4 with reactive patterns and coverage integration.
 
 **Tree Structure:**
 ```
-ReactiveSequence (root)
-├── IsEmergency (condition)
-├── IsBatteryLow (condition)
-├── Mode Selector (selector)
-│   ├── IdleMode
-│   ├── MowingMode
-│   │   ├── NavigateToPose (action)
-│   │   └── SetMowerEnabled (action)
-│   ├── DockingMode
-│   │   └── NavigateToDockingStation (action)
-│   └── RecordingMode
-└── UpdateHighLevelState (action)
+ReactiveSequence (Root)
+├── EmergencyGuard (Fallback)
+│   ├── Inverter → IsEmergency
+│   └── EmergencyHandler (stop, publish status)
+└── MainLogic (Fallback)
+    ├── DockingSequence (battery critical → navigate to dock)
+    ├── MowingSequence (START command)
+    │   ├── PlanCoveragePath (Fields2Cover)
+    │   ├── NavigateToPose to first waypoint (RPP)
+    │   ├── FollowCoveragePath (FTC controller, path-indexed SM)
+    │   ├── Recovery with retry (3 attempts)
+    │   └── Navigate to dock on completion
+    ├── HomeSequence (HOME command)
+    ├── RecordingSequence (S1 command)
+    └── IdleSequence (default)
 ```
 
 **Condition Nodes:**
@@ -255,11 +365,33 @@ ReactiveSequence (root)
 - `IsLocalizationHealthy` – Checks EKF variance from monitor node
 
 **Action Nodes:**
-- `NavigateToPose` – Sends goal to Nav2 action server
+- `PlanCoveragePath` – Calls mowgli_coverage_planner service with Fields2Cover
+- `NavigateToPose` – Sends goal to Nav2 action server (uses RPP by default)
+- `FollowCoveragePath` – Executes coverage waypoints using FTC controller
 - `SetMowerEnabled` – Calls mower_control service
+- `RecoveryHandler` – Attempts goal re-planning with backoff strategy
 - `UpdateHighLevelState` – Sends current mode to firmware
 
 All nodes are registered in `register_nodes.cpp` for dynamic loading from XML.
+
+### mowgli_simulation
+**Gazebo Harmonic simulation assets and physics models** for testing without hardware.
+
+**Contents:**
+- `models/mowgli/` – Complete mower URDF with Gazebo physics, contact sensors, and joint actuators
+- `worlds/backyard.world` – Example lawn simulation environment with grass, obstacles, charging dock
+- `launch/spawn_mowgli.launch.py` – Spawns the mower in Gazebo with sensor bridging
+- Sensor simulation: LiDAR point cloud, IMU (noise and gravity), wheel encoder odometry
+- Motor simulation: Direct velocity control → motor commands via Gazebo plugins
+
+**Docker Usage:**
+```bash
+docker compose up simulation    # Headless Gazebo with ROS2 bridge
+```
+
+**GUI Access:**
+- noVNC: http://localhost:6080/vnc.html (Gazebo visualizer)
+- Foxglove: ws://localhost:8765 (real-time telemetry)
 
 ## Configuration Guide
 

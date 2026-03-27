@@ -370,7 +370,7 @@ void CoveragePlannerNode::execute(
 
   nav_msgs::msg::Path swath_path;
   swath_path.header.frame_id = map_frame_;
-  swath_path.header.stamp    = rclcpp::Clock().now();
+  swath_path.header.stamp    = this->now();
 
   for (size_t i = 0; i < f2c_path.size(); ++i) {
     const auto & state = f2c_path.getState(i);
@@ -418,7 +418,7 @@ nav_msgs::msg::Path CoveragePlannerNode::generate_outline_path(
 {
   nav_msgs::msg::Path path;
   path.header.frame_id = frame;
-  path.header.stamp    = rclcpp::Clock().now();
+  path.header.stamp    = this->now();
 
   for (int pass = 1; pass <= headland_passes_; ++pass) {
     const double inset = static_cast<double>(pass) * headland_width_;
@@ -472,7 +472,9 @@ geometry_msgs::msg::PoseStamped CoveragePlannerNode::make_pose(
 {
   geometry_msgs::msg::PoseStamped pose;
   pose.header.frame_id = frame;
-  pose.header.stamp    = rclcpp::Clock().now();
+  // Use time 0 so TF lookups use the latest available transform rather than
+  // requiring a transform at a specific (possibly stale) timestamp.
+  pose.header.stamp    = rclcpp::Time(0);
   pose.pose.position.x = x;
   pose.pose.position.y = y;
   pose.pose.position.z = 0.0;

@@ -2,9 +2,11 @@
 
 Comprehensive technical documentation of the Mowgli ROS2 system design, including package organization, data flow, communication protocols, and integration points.
 
+Built on **ROS2 Jazzy** with **Gazebo Harmonic** simulation, this architecture spans 9 focused packages providing complete autonomous lawn mower functionality.
+
 ## System Overview
 
-Mowgli ROS2 is organized as a **six-package ecosystem** with clear separation of concerns and layered dependencies:
+Mowgli ROS2 is organized as a **nine-package ecosystem** with clear separation of concerns and layered dependencies:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -17,17 +19,25 @@ Mowgli ROS2 is organized as a **six-package ecosystem** with clear separation of
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │
 │  │  mowgli_behavior │  │ mowgli_nav2_     │  │  mowgli_localization │   │
 │  │  (Behavior Tree) │  │  plugins         │  │  (EKF + monitoring)  │   │
-│  │                  │  │  (FTC            │  │                      │   │
-│  │  10 Hz reactive  │  │   Controller)    │  │  Multiple nodes:     │   │
+│  │                  │  │  (FTC + RPP      │  │                      │   │
+│  │  10 Hz reactive  │  │   Controllers)   │  │  Multiple nodes:     │   │
 │  │  control         │  │                  │  │  - Wheel odometry    │   │
 │  │                  │  │  Nav2 local plan │  │  - GPS converter     │   │
 │  │                  │  │  10 Hz           │  │  - Health monitor    │   │
+│  │                  │  │                  │  │  - Diagnostics       │   │
 │  └──────────────────┘  └──────────────────┘  └──────────────────────┘   │
+│                                                                           │
+│  ┌──────────────────────────────┐  ┌──────────────────────────────────┐ │
+│  │  mowgli_coverage_planner     │  │  mowgli_monitoring               │ │
+│  │  (Fields2Cover v2, action    │  │  (Diagnostics aggregator,        │ │
+│  │   server, boustrophedon)     │  │   MQTT bridge)                   │ │
+│  └──────────────────────────────┘  └──────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
                                      │
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                         Config & Launch Layer                            │
 │                      (mowgli_bringup: URDF, params)                      │
+│                      (mowgli_map: map server, storage)                   │
 └──────────────────────────────────────────────────────────────────────────┘
                                      │
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -50,6 +60,21 @@ Mowgli ROS2 is organized as a **six-package ecosystem** with clear separation of
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Package Overview
+
+| Package | Purpose | Dependencies |
+|---------|---------|--------------|
+| **mowgli_interfaces** | Message, service, and action type definitions | ROS2 core |
+| **mowgli_hardware** | Serial bridge to STM32 firmware (COBS + CRC-16 protocol) | mowgli_interfaces |
+| **mowgli_localization** | Multi-source localization (wheel odometry, IMU, RTK-GPS fusion, EKF) | mowgli_interfaces, robot_localization |
+| **mowgli_nav2_plugins** | Nav2 controller plugins (FTC, RPP + RotationShimController, goal checkers) | nav2_core, mowgli_interfaces |
+| **mowgli_coverage_planner** | Coverage path planning using Fields2Cover v2 (boustrophedon, Dubins turns) | mowgli_interfaces, fields2cover, nav_msgs |
+| **mowgli_behavior** | Reactive behavior tree control (BehaviorTree.CPP v4) | mowgli_interfaces, nav2_msgs |
+| **mowgli_monitoring** | Diagnostics aggregation and MQTT bridge for external monitoring | diagnostic_msgs |
+| **mowgli_simulation** | Gazebo Harmonic worlds, robot models, and ros_gz_bridge configuration | mowgli_bringup, ros_gz_sim, ros_gz_bridge |
+| **mowgli_map** | Map server, storage, and persistence for offline maps | nav_msgs, nav2_map_server |
+| **mowgli_bringup** | Configuration, launch orchestration, URDF/xacro, and integration layer | All packages above |
+
 ## Package Dependency Graph
 
 ```
@@ -64,8 +89,22 @@ mowgli_interfaces (base layer)
     ├──→ mowgli_nav2_plugins
     │       └──→ mowgli_bringup
     │
-    └──→ mowgli_behavior
+    ├──→ mowgli_behavior
+    │       └──→ mowgli_bringup
+    │
+    ├──→ mowgli_coverage_planner
+    │       └──→ mowgli_bringup
+    │
+    ├──→ mowgli_monitoring
+    │       └──→ mowgli_bringup
+    │
+    └──→ mowgli_map
             └──→ mowgli_bringup
+
+mowgli_simulation (standalone testing)
+    ├──→ mowgli_bringup
+    ├──→ ros_gz_sim, ros_gz_bridge
+    └──→ Gazebo Harmonic
 
 mowgli_bringup (integration layer)
     ├──→ launch files
@@ -602,7 +641,7 @@ Starts:
 
 ### 5. mowgli_nav2_plugins
 
-**Purpose:** Custom Nav2 controller plugin (Follow-The-Carrot algorithm).
+**Purpose:** Custom Nav2 controller plugins for navigation and coverage path following.
 
 **Location:** `src/mowgli_nav2_plugins/`
 
@@ -612,288 +651,728 @@ Starts:
 <library path="libftc_controller_plugin">
   <class type="mowgli_nav2_plugins::FTCController"
          base_class_type="nav2_core::Controller">
-    <description>Follow-The-Carrot local planner for lawn mowing robots</description>
+    <description>Follow-The-Carrot controller for both transit and coverage navigation</description>
   </class>
 </library>
 ```
 
-#### FTCController: State Machine & Algorithm
+**Two Controller Profiles:**
 
-**5-State FSM:**
+The same FTC controller is used in two different navigation modes via the behavior tree:
+1. **FollowPath** – Transit navigation and docking (RPP + RotationShimController wrapper)
+2. **FollowCoveragePath** – Coverage path following (native FTC, path-indexed tracking)
+
+#### FTCController: 5-State FSM & Path-Indexed Algorithm
+
+**State Machine:**
 
 ```
-          Initial State
-               │
-               ▼
-    ┌─────────────────────┐
-    │   PRE_ROTATE        │
-    │ (orientation to path)
-    └─────────────────────┘
-            │
-     Goal within lookahead?
-     │                      │
-    YES                     NO
-     │                      │
-     ▼                      ▼
-┌──────────────┐  ┌──────────────────┐
-│   FORWARD    │  │   APPROACH       │
-│              │  │ (reduce speed)   │
-└──────────────┘  └──────────────────┘
-     │                      │
-     └──────────────────────┘
-            │
-      Goal reached?
-            │
-            ▼
-     ┌────────────┐
-     │   STOP     │
-     │ (brake)    │
-     └────────────┘
+      Initial State
+           │
+           ▼
+  ┌───────────────────┐
+  │   PRE_ROTATE      │
+  │ (align with path) │
+  └───────────────────┘
+          │
+          ▼
+  ┌───────────────────┐
+  │   FOLLOWING       │ ← advance along path via path index
+  │ (path tracking)   │   (not lookahead-based, but index-based)
+  └───────────────────┘
+          │
+          ▼
+  ┌────────────────────────────────────┐
+  │   WAITING_FOR_GOAL_APPROACH        │
+  │ (robot near goal, slow approach)   │
+  └────────────────────────────────────┘
+          │
+          ▼
+  ┌───────────────────┐
+  │   POST_ROTATE     │
+  │ (align to goal    │
+  │  orientation)     │
+  └───────────────────┘
+          │
+          ▼
+  ┌───────────────────┐
+  │   FINISHED        │
+  │ (goal reached)    │
+  └───────────────────┘
 
-Oscillation Recovery:
-  Any state + oscillation detected → hold position, then retry
+Oscillation Recovery (any state):
+  If velocity < threshold for > 5 sec → hold, retry
 ```
 
-**Algorithm: PID-based Velocity Control**
+**Algorithm: Path-Indexed PID Control**
 
 Inputs:
-- Global path (array of PoseStamped)
+- Global path (array of PoseStamped with positions and orientations)
 - Robot pose (from TF: odom → base_link)
 - Costmap (for obstacle checking)
 
 Process:
 
-1. **Carrot Point Selection:**
-   - Find nearest point on path
-   - Lookahead distance ahead: `lookahead_dist` (default 0.6 m)
-   - SLERP interpolation for smooth paths
+1. **Path Index Advancement:**
+   - Maintain `current_index_` along the path (not lookahead distance)
+   - Advance index as robot progresses along path
+   - Control point is the pose at current_index_ (or interpolated between indices)
 
-2. **Error Calculation:**
+2. **Error Calculation (in base_link frame):**
    ```
-   cross_track_error = perpendicular distance to path
-   heading_error = angle to carrot point
-   velocity_error = desired_vel - current_vel
-   ```
-
-3. **PID Control (3-channel independent):**
-   ```
-   linear_pid:
-     u_linear = Kp * cross_track_error
-              + Ki * integral(cross_track_error)
-              + Kd * d_cross_track_error/dt
-
-   angular_pid:
-     u_angular = Kp * heading_error
-               + Ki * integral(heading_error)
-               + Kd * d_heading_error/dt
-
-   acceleration_pid:
-     u_accel = Kp * velocity_error
-             + Ki * integral(velocity_error)
-             + Kd * d_velocity_error/dt
+   lateral_error = cross-track distance to path
+   longitudinal_error = error along path heading
+   angular_error = angle to target orientation
    ```
 
-4. **Output Saturation:**
+3. **Three Independent PID Channels:**
    ```
-   cmd_vel.linear.x = clamp(desired_linear_vel + u_linear,
-                             -max_linear_vel, max_linear_vel)
-   cmd_vel.angular.z = clamp(u_angular, -max_angular_vel, max_angular_vel)
+   Lateral PID:        u_lat  = Kp_lat * lat_error   + Ki_lat * ∫lat_error   + Kd_lat * d(lat_error)/dt
+   Longitudinal PID:   u_lon  = Kp_lon * lon_error   + Ki_lon * ∫lon_error   + Kd_lon * d(lon_error)/dt
+   Angular PID:        u_ang  = Kp_ang * ang_error   + Ki_ang * ∫ang_error   + Kd_ang * d(ang_error)/dt
    ```
+
+4. **Velocity Command Generation:**
+   - Lateral error modulates steering (angular output)
+   - Longitudinal error and state-dependent speeds control forward motion
+   - Speed profile: fast (0.5 m/s) → slow (0.2 m/s) near goal
 
 5. **Collision Avoidance:**
-   - Check costmap within robot footprint
-   - If obstacle detected, trigger oscillation recovery
-   - Or return FAILURE to planner
+   - Monitor costmap within robot footprint
+   - If obstacle within lookahead, trigger oscillation recovery
+   - If persistent, return FAILURE to planner
 
 **State Transitions:**
 
-- **PRE_ROTATE → FORWARD:** Goal is within lookahead distance AND robot is roughly aligned
-- **FORWARD → APPROACH:** Robot within 1.0 m of goal
-- **APPROACH → STOP:** Robot within `xy_goal_tolerance` (0.25 m) and `yaw_goal_tolerance` (0.25 rad)
-- **STOP → FORWARD/PRE_ROTATE:** If another goal provided
+- **PRE_ROTATE → FOLLOWING:** Robot roughly aligned with path start
+- **FOLLOWING → WAITING_FOR_GOAL_APPROACH:** Current_index approaches path end (robot < max_follow_distance from goal)
+- **WAITING_FOR_GOAL_APPROACH → POST_ROTATE:** Robot within xy_goal_tolerance, ready to orient to final pose
+- **POST_ROTATE → FINISHED:** Robot within yaw_goal_tolerance (orientation correct)
+- Any state: Oscillation detected → recover, retry
 
-**Oscillation Recovery:**
+**Oscillation Detection & Recovery:**
 
-Detects when the robot is trapped (oscillating back-and-forth or stuck):
+The `FailureDetector` class tracks velocity history:
+- If |velocity| < `oscillation_v_eps` and |angular_velocity| < `oscillation_omega_eps` for > `oscillation_recovery_min_duration`
+- Robot is considered stuck
+- Controller holds position for 2 seconds, then retries the path
 
-```
-If |velocity| < min_velocity_threshold for > oscillation_recovery_min_duration:
-    Hold position (zero velocity for 2 seconds)
-    Then retry navigation
-```
-
-**Parameters (in nav2_params.yaml):**
+**Parameters (mowgli_nav2_plugins section, nav2_params.yaml):**
 
 ```yaml
 FollowPath:
   plugin: "mowgli_nav2_plugins::FTCController"
 
-  # Motion targets
-  desired_linear_vel: 0.3           # m/s – cruising speed for mowing
-  max_linear_vel: 0.5               # m/s – safety limit
-  max_angular_vel: 1.0              # rad/s
+  # Speed profiles (state-dependent)
+  speed_fast: 0.5                           # m/s in FOLLOWING state
+  speed_slow: 0.2                           # m/s in WAITING_FOR_GOAL_APPROACH
+  speed_fast_threshold: 1.5                 # distance to goal (m) before slowing
+  speed_angular: 20.0                       # angular speed target (rad/s, virtual)
+  acceleration: 1.0                         # m/s²
 
-  # Lookahead (carrot point distance)
-  lookahead_dist: 0.6               # m
-  lookahead_max_angle: 0.5          # rad max deviation from heading
+  # PID longitudinal
+  kp_lon: 1.0
+  ki_lon: 0.0
+  ki_lon_max: 10.0
+  kd_lon: 0.0
 
-  # PID gains (linear)
-  linear_p_gain: 2.0
-  linear_i_gain: 0.5
-  linear_d_gain: 0.1
-  linear_max_integral: 0.5
+  # PID lateral
+  kp_lat: 1.0
+  ki_lat: 0.0
+  ki_lat_max: 10.0
+  kd_lat: 0.0
 
-  # PID gains (angular)
-  angular_p_gain: 2.0
-  angular_i_gain: 0.5
-  angular_d_gain: 0.1
-  angular_max_integral: 0.5
+  # PID angular
+  kp_ang: 1.0
+  ki_ang: 0.0
+  ki_ang_max: 10.0
+  kd_ang: 0.0
 
-  # Oscillation recovery
-  use_oscillation_recovery: true
+  # Robot limits
+  max_cmd_vel_speed: 0.5                    # m/s (clamping saturation)
+  max_cmd_vel_ang: 1.0                      # rad/s
+  max_goal_distance_error: 1.0              # m (triggers failure if exceeded)
+  max_goal_angle_error: 10.0                # degrees
+  goal_timeout: 5.0                         # seconds before goal declared unreachable
+  max_follow_distance: 1.0                  # m (distance at which path end is "reached")
+
+  # Options
+  forward_only: true                        # no backward driving
+  debug_pid: false
+  debug_obstacle: false
+
+  # Recovery
+  oscillation_recovery: true
+  oscillation_v_eps: 5.0                    # cm/s threshold for velocity stagnation
+  oscillation_omega_eps: 5.0                # deg/s threshold for rotation stagnation
   oscillation_recovery_min_duration: 5.0    # seconds
-  oscillation_recovery_max_cycles: 3        # max retry attempts
+
+  # Obstacle checking
+  check_obstacles: true
+  obstacle_lookahead: 5                     # number of path points to check ahead
+  obstacle_footprint: true                  # use full robot footprint
 ```
 
-#### oscillation_detector.cpp
+#### FailureDetector (oscillation_detector.hpp)
 
-Helper class that tracks velocity history to detect stuck-robot conditions.
+Ring-buffer-based failure detection:
 
 ```cpp
-class OscillationDetector {
-  void setBufferLength(int length);      // Set history window
+class FailureDetector {
+public:
+  void setBufferLength(int length);
   void update(double linear_vel, double angular_vel);
-  bool isOscillating() const;            // Returns true if stuck
+  bool isOscillating() const;               // Returns true if stuck
+
+private:
+  std::vector<double> velocity_history_;
+  int buffer_index_{0};
 };
 ```
 
-Internal buffer (ring) stores the last N velocity commands and checks for stagnation.
+Fills a history buffer with (v, omega) samples at each `computeVelocityCommands()` call. Returns true if all buffered values fall below threshold (stagnation detected).
 
 ---
 
 ### 6. mowgli_behavior
 
-**Purpose:** High-level reactive control using BehaviorTree.CPP v4.
+**Purpose:** High-level reactive control using BehaviorTree.CPP v4 with multi-mode state machine.
 
 **Location:** `src/mowgli_behavior/`
 
 **Architecture:**
 
 ```
-BehaviorTreeNode (main ROS2 node)
+BehaviorTreeNode (main ROS2 node, 10 Hz)
     │
-    ├── BTContext (shared state)
-    │   ├── node reference (for publishing, services)
+    ├── BTContext (shared state across all nodes)
+    │   ├── node reference (for publishing, services, actions)
     │   ├── latest_status (from hardware bridge)
-    │   ├── latest_emergency (from hardware bridge)
-    │   ├── latest_power (from hardware bridge)
+    │   ├── latest_emergency (latched emergency flag)
+    │   ├── latest_power (battery voltage)
+    │   ├── command_queue (high-level commands from GUI)
     │   └── [other sensory state]
     │
-    └── BehaviorTree instance (XML-loaded)
+    └── BehaviorTree instance (XML: main_tree.xml)
         │
-        └── Tree root: ReactiveSequence
+        └── ReactiveSequence: Root
             │
-            ├── Child 1: IsEmergency (condition)
-            ├── Child 2: IsBatteryLow (condition)
-            ├── Child 3: ModeSelector (selector)
-            │   ├── IsInIdleMode? → IdleMode (sequence)
-            │   ├── IsInMowingMode? → MowingMode (sequence)
-            │   │   ├── IsMowerHealthy? (condition)
-            │   │   ├── NavigateToPose (action to Nav2)
-            │   │   └── SetMowerEnabled (service call)
-            │   ├── IsInDockingMode? → DockingMode (sequence)
-            │   │   └── NavigateToDockingStation (action)
-            │   └── IsInRecordingMode? → RecordingMode (sequence)
+            ├── Fallback: EmergencyGuard
+            │   ├── Inverter(IsEmergency) → continue if safe
+            │   └── Sequence: EmergencyHandler
+            │       ├── SetMowerEnabled(false)
+            │       ├── StopMoving()
+            │       └── PublishHighLevelStatus(EMERGENCY)
             │
-            └── Child 4: UpdateHighLevelState (action)
-                └── Sends current mode to STM32 firmware
+            └── Fallback: MainLogic
+                ├── Sequence: DockingSequence (battery critical < 20.0 V)
+                │   ├── NeedsDocking threshold="20.0"
+                │   ├── SetMowerEnabled(false)
+                │   ├── StopMoving()
+                │   └── NavigateToPose(dock_pose)
+                │
+                ├── Sequence: MowingSequence (COMMAND_START = 1)
+                │   ├── IsCommand(1)
+                │   ├── PublishHighLevelStatus(UNDOCKING)
+                │   ├── SetMowerEnabled(true)
+                │   ├── PlanCoveragePath(area_index=0)
+                │   ├── NavigateToPose(first_waypoint)
+                │   ├── Fallback: CoverageWithRecovery
+                │   │   ├── RetryUntilSuccessful(3 attempts)
+                │   │   │   ├── FollowCoveragePath()
+                │   │   │   └── Recover: StopMoving + 2s wait
+                │   │   └── FailedCoverageDock: shutdown, navigate to dock
+                │   └── NavigateToPose(dock_pose) → IDLE_DOCKED
+                │
+                ├── Sequence: HomeSequence (COMMAND_HOME = 2)
+                │   ├── IsCommand(2)
+                │   ├── SetMowerEnabled(false)
+                │   ├── StopMoving()
+                │   └── NavigateToPose(dock_pose)
+                │
+                ├── Sequence: RecordingSequence (COMMAND_S1 = 3)
+                │   ├── IsCommand(3)
+                │   ├── PublishHighLevelStatus(RECORDING)
+                │   └── WaitForDuration(0.5s)
+                │
+                └── Sequence: IdleSequence (default)
+                    ├── PublishHighLevelStatus(IDLE)
+                    └── WaitForDuration(0.5s)
 
-Update frequency: 10 Hz (controlled by BehaviorTreeNode timer)
+Update frequency: 10 Hz tick() cycle
+Execution pattern: ReactiveSequence re-evaluates all children each tick
 ```
 
-#### Condition Nodes (in condition_nodes.cpp)
+**Tree Structure (from main_tree.xml):**
+
+The tree implements a priority-based fallback selector:
+1. **Emergency Guard (highest priority):** If emergency active → disable, stop, halt
+2. **Docking (critical battery):** If battery < 20% → dock immediately (uninterruptible)
+3. **Mowing (user-commanded):** Coverage path planning and execution with recovery
+4. **Home (user-commanded):** Return to dock on user request
+5. **Recording (experimental):** Waypoint recording mode
+6. **Idle (default):** Standby, periodic status updates
+
+Each sequence transitions through defined high-level states (IDLE, UNDOCKING, MOWING, RECOVERING, DOCKING, RECORDING) published to STM32 firmware for synchronization.
+
+#### Condition Nodes (condition_nodes.cpp)
 
 ```cpp
 class IsEmergency : public BT::ConditionNode
-// Returns SUCCESS if emergency latched, FAILURE otherwise
+// Returns SUCCESS if active_emergency bit set
 
-class IsBatteryLow : public BT::ConditionNode
-// Checks v_battery < LOW_VOLTAGE_THRESHOLD (e.g., 18.0 V)
+class NeedsDocking : public BT::ConditionNode
+// Checks battery_voltage < threshold parameter (default 20.0 V)
+
+class IsCommand : public BT::ConditionNode
+// Port In: command (uint8)
+// Returns SUCCESS if command matches current high-level command from GUI
 
 class IsGpsAvailable : public BT::ConditionNode
-// Checks RTK fix type (must be RTK Fixed, not Float or No-fix)
+// Checks RTK fix status (RTK Fixed = best)
 
 class IsLocalizationHealthy : public BT::ConditionNode
-// Queries localization_monitor_node status (EKF variance)
-
-class IsMowerHealthy : public BT::ConditionNode
-// Checks hardware_bridge status: sound available, UI available, etc.
-
-class IsRaining : public BT::ConditionNode
-// Checks rain sensor bit from Status message
+// Queries /localization/status; returns SUCCESS if EKF healthy
 ```
 
-#### Action Nodes (in action_nodes.cpp)
+#### Action Nodes (action_nodes.cpp)
 
 ```cpp
 class NavigateToPose : public BT::AsyncActionNode
-// Sends goal to Nav2 action server (/navigate_to_pose)
-// Port In: goal_x, goal_y, goal_theta
-// Returns RUNNING while in progress, SUCCESS on completion, FAILURE on abort
+// Contacts Nav2 /navigate_to_pose action server
+// Port In: goal="x;y;yaw" (string format)
+// Returns RUNNING (in progress), SUCCESS (reached), FAILURE (abort/timeout)
+
+class PlanCoveragePath : public BT::AsyncActionNode
+// Sends PlanCoverage action to mowgli_coverage_planner
+// Port In: area_index (0-based area number)
+// Publishes feedback during planning (progress_percent, phase)
+// Returns SUCCESS with path, FAILURE if planning failed
+
+class FollowCoveragePath : public BT::AsyncActionNode
+// Executes the coverage path from coverage_planner
+// No input ports; reads from shared result
+// Returns RUNNING (following), SUCCESS (completed), FAILURE (collision/stuck)
 
 class SetMowerEnabled : public BT::ActionNode
 // Calls /hardware_bridge/mower_control service
 // Port In: enabled (bool)
-// Returns SUCCESS on service success, FAILURE otherwise
+// Fire-and-forget; always returns SUCCESS (or gracefully continues in simulation)
 
-class UpdateHighLevelState : public BT::ActionNode
-// Sends current_mode and gps_quality to STM32 via /hardware_bridge/high_level_state
-// Informs firmware of high-level decision (idle, mowing, docking, recording)
+class StopMoving : public BT::ActionNode
+// Publishes zero Twist to /cmd_vel
+// Returns SUCCESS
 
-class SendEmergencyStop : public BT::ActionNode
-// Calls /hardware_bridge/emergency_stop with emergency=true
-// For autonomous safety triggers
+class PublishHighLevelStatus : public BT::ActionNode
+// Publishes state enum to STM32 via firmware interface
+// Port In: state (uint8), state_name (string)
+// Returns SUCCESS
 
-class SkipRecovery : public BT::ActionNode
-// Calls /hardware_bridge/emergency_stop with emergency=false
-// Releases latched emergency stop
+class WaitForDuration : public BT::ActionNode
+// Sleep for specified duration
+// Port In: duration_sec (double)
+// Returns SUCCESS after duration elapsed
+
+class ClearCommand : public BT::ActionNode
+// Clears the pending high-level command (e.g., COMMAND_START)
+// Returns SUCCESS
+
+class RetryUntilSuccessful : public BT::ControlNode
+// Wraps a child node; retries up to N times
+// Port In: num_attempts (int)
+// Returns SUCCESS on any child success, FAILURE after all attempts fail
 ```
 
 #### Tree Control (BehaviorTreeNode)
 
 **Subscriptions:**
-- `/hardware_bridge/status` – Mower state, sensor availability
-- `/hardware_bridge/emergency` – Emergency status
-- `/hardware_bridge/power` – Battery voltage, charging
-
-**Services Offered:**
-- `/mowgli_behavior/set_mode` – Switch between Idle, Mowing, Docking, Recording modes (high-level)
+- `/hardware_bridge/status` – Mower state, rain sensor, blade status
+- `/hardware_bridge/emergency` – Latched emergency flag
+- `/hardware_bridge/power` – Battery voltage (v_battery)
+- `/high_level_control` (service) – Receive mode commands from GUI (START, HOME, S1, S2)
 
 **Services Called:**
 - `/hardware_bridge/mower_control` – Enable/disable blade
-- `/hardware_bridge/emergency_stop` – Safety control
-- `/navigate_to_pose` (Nav2 action) – Send navigation goals
+- `/hardware_bridge/emergency_stop` – Release latched emergency
+- `/navigate_to_pose` (Nav2) – Send navigation goals
+- `/plan_coverage` (mowgli_coverage_planner) – Generate coverage paths
 
-**Tree Updates:**
-- 10 Hz tick() cycle
-- ReactiveSequence: on any child returning FAILURE, entire sequence restarts
-- Emergency guard: IsEmergency always evaluated first, aborts all other branches on true
+**Publishing:**
+- `/high_level_status` (std_msgs/UInt8) – Current state (IDLE, UNDOCKING, MOWING, etc.)
+
+**Execution Model:**
+- 10 Hz tick() cycle (100 ms)
+- ReactiveSequence: re-evaluates all children on each tick
+- Emergency guard is always first: any emergency → abort all activity
+- Fallback selectors: try sequences in priority order (docking > mowing > home > idle)
+- Action nodes (NavigateToPose, FollowCoveragePath) are async: return RUNNING while in progress
 
 #### Node Registration (register_nodes.cpp)
 
-All node classes registered with BehaviorTree factory:
+BehaviorTree factory registration:
 
 ```cpp
 BT_REGISTER_NODES(factory) {
   factory.registerNodeType<IsEmergency>("IsEmergency");
-  factory.registerNodeType<IsBatteryLow>("IsBatteryLow");
+  factory.registerNodeType<NeedsDocking>("NeedsDocking");
+  factory.registerNodeType<IsCommand>("IsCommand");
   factory.registerNodeType<NavigateToPose>("NavigateToPose");
+  factory.registerNodeType<PlanCoveragePath>("PlanCoveragePath");
+  factory.registerNodeType<FollowCoveragePath>("FollowCoveragePath");
   factory.registerNodeType<SetMowerEnabled>("SetMowerEnabled");
+  factory.registerNodeType<StopMoving>("StopMoving");
+  factory.registerNodeType<PublishHighLevelStatus>("PublishHighLevelStatus");
+  factory.registerNodeType<WaitForDuration>("WaitForDuration");
+  factory.registerNodeType<ClearCommand>("ClearCommand");
   // ... etc
 }
 ```
 
-Allows tree XML to reference nodes by name.
+---
+
+### 7. mowgli_coverage_planner
+
+**Purpose:** Autonomous coverage path planning using Fields2Cover v2 library.
+
+**Location:** `src/mowgli_coverage_planner/`
+
+**Architecture:**
+
+```
+Coverage Planner Node (ROS2)
+    │
+    ├── Inputs:
+    │   ├── /plan_coverage action server (PlanCoverage.action)
+    │   │   └── Goal: outer_boundary (geometry_msgs/Polygon), mow_angle_deg, skip_outline
+    │   │   └── Feedback: progress_percent (0-100), phase (string)
+    │   │   └── Result: path (nav_msgs/Path), outline_path, total_distance, coverage_area
+    │   │
+    │   └── Parameters:
+    │       ├── tool_width (m) – mower cutting width
+    │       ├── headland_passes – number of perimeter passes
+    │       ├── headland_width (m) – offset distance per pass
+    │       ├── path_spacing (m) – inter-swath spacing
+    │       ├── min_turning_radius (m) – Dubins curve radius
+    │       └── default_mow_angle (deg) – fixed angle, or -1.0 for auto-optimize
+    │
+    ├── Fields2Cover v2 Pipeline:
+    │   ├── 1. Validate outer_boundary polygon
+    │   ├── 2. Generate headland cells (ConstHL) – perimeter passes
+    │   ├── 3. Generate swaths (BruteForce) – optimal angle search
+    │   ├── 4. Order swaths (BoustrophedonOrder) – minimize turns
+    │   ├── 5. Plan Dubins path (DubinsCurves) – smooth turnarounds
+    │   └── 6. Convert F2C states to nav_msgs::Path (poses + orientations)
+    │
+    └── Outputs:
+        ├── /coverage_path (nav_msgs/Path, transient_local QoS)
+        │   └── Full boustrophedon path with poses for FollowCoveragePath controller
+        └── /coverage_outline (nav_msgs/Path, transient_local QoS)
+            └── Headland outline for visualization in RViz
+```
+
+**Algorithm: Fields2Cover Workflow**
+
+The coverage planner follows this deterministic pipeline:
+
+1. **Headland Generation (ConstHL):**
+   - Offset the outer boundary inward by `headland_passes * headland_width_`
+   - Creates a nested ring of passes around the perimeter
+   - Used for edge coverage (e.g., trim grass borders)
+
+2. **Swath Generation (BruteForce):**
+   - If `mow_angle_deg < 0.0`, auto-search all angles and select minimum-swath orientation
+   - Otherwise, generate swaths parallel to the specified angle
+   - Spacing between swaths = `path_spacing` (typically same as `tool_width`)
+   - Returns a list of line segments (swaths)
+
+3. **Swath Ordering (BoustrophedonOrder):**
+   - Arrange swaths in a boustrophedon pattern (back-and-forth)
+   - Minimizes travel distance between consecutive swaths
+   - Reduces number of sharp turns
+
+4. **Path Planning (DubinsCurves):**
+   - Connect consecutive swaths with smooth Dubins curves
+   - Respects `min_turning_radius` for robot dynamics
+   - Ensures kinematically feasible turns (no infinite curvature)
+
+5. **Path Conversion:**
+   - Convert F2C `State` objects (x, y, angle) to `geometry_msgs/PoseStamped`
+   - Generate continuous path suitable for FTC controller
+   - Poses include orientation for turn preparation
+
+**Parameters (coverage_planner.yaml):**
+
+```yaml
+coverage_planner_node:
+  ros__parameters:
+    tool_width: 0.18                  # m – mower blade width
+    headland_passes: 2                # number of perimeter passes
+    headland_width: 0.18              # m – offset per pass
+    path_spacing: 0.18                # m – swath spacing (usually = tool_width)
+    min_turning_radius: 0.3           # m – minimum Dubins radius
+    default_mow_angle: -1.0           # deg (-1.0 for auto-optimize)
+    map_frame: "map"
+```
+
+**Action Feedback:**
+
+During planning, the action publishes feedback at each phase:
+```
+Phase 0: headland (5%)
+Phase 1: swaths (35%)
+Phase 2: routing (55%)
+Phase 3: path_planning (75%)
+Phase 4: path_planning (90%)
+Phase 5: path_planning (100%) → SUCCESS
+```
+
+Allows behavior tree to monitor progress and detect hangs.
+
+---
+
+### 8. mowgli_monitoring
+
+**Purpose:** System health diagnostics aggregation and external MQTT bridge.
+
+**Location:** `src/mowgli_monitoring/`
+
+**Architecture:**
+
+```
+Monitoring System
+    │
+    ├── DiagnosticsNode (1 Hz publish rate)
+    │   │
+    │   ├── Subscriptions (sensor QoS):
+    │   │   ├── /status (Status) – mower state, sensors
+    │   │   ├── /emergency (Emergency) – emergency status
+    │   │   ├── /power (Power) – battery voltage, charging
+    │   │   ├── /imu/data_raw (sensor_msgs/Imu)
+    │   │   ├── /scan (sensor_msgs/LaserScan)
+    │   │   ├── /wheel_odom (nav_msgs/Odometry)
+    │   │   └── /gps/fix (sensor_msgs/NavSatFix)
+    │   │
+    │   └── Diagnostic Checks (aggregated to DiagnosticArray):
+    │       ├── check_hardware_bridge() – last status age, mower state
+    │       ├── check_emergency() – latched/active emergency status
+    │       ├── check_battery() – voltage → SOC %, charger status
+    │       ├── check_imu() – data freshness
+    │       ├── check_lidar() – scan freshness, obstacles
+    │       ├── check_gps() – fix type, lat/lon, age
+    │       ├── check_odometry() – wheel odom freshness
+    │       └── check_motors() – ESC/motor temperature
+    │
+    └── MqttBridgeNode (optional, for cloud telemetry)
+        └── Republishes selected diagnostics to MQTT broker
+            └── Topic pattern: /mowgli/diagnostics/{subsystem}
+```
+
+**Diagnostic Levels:**
+- **OK** – All systems nominal
+- **WARN** – Degraded but operational (e.g., GPS float, high temp)
+- **ERROR** – Critical failure (e.g., no GPS fix, emergency active)
+- **STALE** – Data stream timeout (sensor not reporting)
+
+**Health Classification Functions:**
+
+```cpp
+uint8_t classify_freshness(age_sec, never, warn_sec, error_sec)
+  // Returns OK, WARN, or ERROR based on age threshold
+
+uint8_t classify_battery(percentage, warn_pct, error_pct)
+  // Returns OK, WARN, or ERROR based on SOC threshold
+
+uint8_t classify_temperature(temp_c, warn_c, error_c)
+  // Returns OK, WARN, or ERROR based on temperature threshold
+```
+
+**Parameters (monitoring.yaml):**
+
+```yaml
+diagnostics_node:
+  ros__parameters:
+    publish_rate: 1.0                    # Hz – how often to aggregate
+    freshness_warn_sec: 5.0              # sensor data age before warn
+    freshness_error_sec: 10.0            # sensor data age before error
+    battery_warn_pct: 20.0               # SOC % before warn
+    battery_error_pct: 10.0              # SOC % before error
+    motor_temp_warn_c: 60.0
+    motor_temp_error_c: 80.0
+```
+
+**Output:**
+
+Publishes `diagnostic_msgs/DiagnosticArray` to `/diagnostics` topic:
+- Used by system monitors, RViz diagnostics viewer, and external dashboards
+- Also ingested by BehaviorTree condition nodes (e.g., IsLocalizationHealthy, IsBatteryLow)
+
+---
+
+### 9. mowgli_simulation
+
+**Purpose:** Gazebo Harmonic simulation environment with ros_gz_bridge integration.
+
+**Location:** `src/mowgli_simulation/`
+
+**Architecture:**
+
+```
+Simulation Stack (ros_gz_sim + ros_gz_bridge)
+    │
+    ├── Gazebo Harmonic Server
+    │   └── World SDF (garden.sdf or empty_garden.sdf)
+    │       └── Robot model (model.sdf)
+    │           ├── Physics (differential drive plugin)
+    │           ├── LiDAR sensor (Gazebo plugin publishes Gazebo topic)
+    │           ├── IMU sensor (Gazebo plugin)
+    │           └── Caster wheels (collision only, no TF)
+    │
+    ├── ros_gz_bridge (YAML-configured)
+    │   └── Bridges Gazebo topics ↔ ROS2 topics
+    │       ├── gz/model/mowgli_mower/cmd_vel → /cmd_vel (Twist)
+    │       ├── gz/model/mowgli_mower/scan ← /scan (LaserScan)
+    │       ├── gz/model/mowgli_mower/imu ← /imu/data_raw (Imu)
+    │       └── gz/model/mowgli_mower/odometry ← /odom (Odometry, if available)
+    │
+    ├── Static TF Bridges (identity transforms)
+    │   ├── lidar_link → mowgli_mower/laser_link/lidar_sensor
+    │   └── imu_link → mowgli_mower/base_link/imu_sensor
+    │
+    └── ROS2 Stack
+        └── (identical to real hardware)
+            ├── robot_state_publisher (URDF)
+            ├── Nav2 stack
+            ├── SLAM (if enabled)
+            └── Behavior tree
+```
+
+**Launch File: simulation.launch.py**
+
+```python
+Sequence:
+  1. Declare arguments (world, use_rviz, headless, spawn_x/y/z/yaw)
+  2. Launch Gazebo Ignition with SDF world file
+  3. Spawn mowgli_mower model at (spawn_x, spawn_y, spawn_z, spawn_yaw)
+  4. Start robot_state_publisher (URDF from mowgli_bringup)
+  5. Start ros_gz_bridge with gazebo_bridge.yaml
+  6. Create static TF bridges (Gazebo sensor frames → URDF frames)
+  7. Optionally start RViz2 (mowgli_sim.rviz config)
+```
+
+**Gazebo Worlds:**
+
+| World | File | Purpose |
+|-------|------|---------|
+| garden | worlds/garden.sdf | Realistic lawn with obstacles, trees, slope |
+| empty_garden | worlds/empty_garden.sdf | Flat rectangular field (testing, no obstacles) |
+
+**Robot Model (model.sdf):**
+
+- **Differential drive plugin:** Subscribes to `cmd_vel`, drives wheels
+- **LiDAR plugin:** 16-beam, 25 m range, publishes point cloud + LaserScan
+- **IMU plugin:** 6-DOF gyro + accel, publishes Imu messages
+- **Gazebo physics:** ODE or Bullet engine with friction/gravity
+- **Collision meshes:** Wheel contact points, chassis boundary
+- **Visual models:** 3D mesh for rendering
+
+**Bridge Configuration (gazebo_bridge.yaml):**
+
+```yaml
+# Example bridge configuration
+bridges:
+  - topic_name: "/cmd_vel"
+    ros_type_name: "geometry_msgs/msg/Twist"
+    gz_type_name: "gz.msgs.Twist"
+    direction: ROS_TO_GZ
+
+  - topic_name: "/scan"
+    ros_type_name: "sensor_msgs/msg/LaserScan"
+    gz_type_name: "gz.msgs.LaserScan"
+    direction: GZ_TO_ROS
+
+  - topic_name: "/imu/data_raw"
+    ros_type_name: "sensor_msgs/msg/Imu"
+    gz_type_name: "gz.msgs.IMU"
+    direction: GZ_TO_ROS
+```
+
+**Usage:**
+
+```bash
+# Full simulation with RViz
+ros2 launch mowgli_simulation simulation.launch.py
+
+# Headless (CI/testing, no GUI)
+ros2 launch mowgli_simulation simulation.launch.py headless:=true use_rviz:=false
+
+# Custom world
+ros2 launch mowgli_simulation simulation.launch.py world:=/path/to/custom.sdf
+```
+
+The simulated robot is fully compatible with the real robot's ROS2 stack, allowing testing of Nav2, behavior trees, and coverage planning without hardware.
+
+---
+
+### 10. mowgli_map
+
+**Purpose:** Map storage, persistence, and serving for offline navigation.
+
+**Location:** `src/mowgli_map/`
+
+**Features:**
+- Loads pre-recorded SLAM maps from disk
+- Serves /map topic (occupancy grid) to Nav2
+- Persists maps generated during online SLAM runs
+- Supports multi-map environments (e.g., different properties/zones)
+
+---
+
+## Custom Navigate-to-Pose Behavior Tree
+
+Nav2's internal behavior tree is extended with a **GoalCheckerSelector** node to support the dual goal-checker architecture:
+
+**File:** `src/mowgli_bringup/config/navigate_to_pose.xml`
+
+```xml
+<BehaviorTree ID="NavigateToPose">
+  <Fallback name="Root">
+    <!-- Try path-following with stopped_goal_checker (transit mode) -->
+    <Sequence name="TransitSequence">
+      <GoalCheckerSelector goal_checker="stopped_goal_checker"/>
+      <FollowPath path="global_path"/>
+    </Sequence>
+
+    <!-- Fallback to coverage goal-checker (coverage mode) -->
+    <Sequence name="CoverageSequence">
+      <GoalCheckerSelector goal_checker="coverage_goal_checker"/>
+      <FollowCoveragePath path="coverage_path"/>
+    </Sequence>
+  </Fallback>
+</BehaviorTree>
+```
+
+The **GoalCheckerSelector** invokes the appropriate goal checker based on the current navigation mode, allowing different success criteria for transit (full orientation alignment) vs. coverage (path completion index).
+
+---
+
+## Foxglove Bridge Integration
+
+Instead of rosbridge_suite, the system uses **Foxglove Bridge** for remote web UI and telemetry:
+
+**Port:** 8765 (WebSocket)
+
+**Benefits:**
+- Modern TypeScript client library
+- Native ROS2 support (Foxglove Studio)
+- Lower latency than rosbridge
+- Reduced CPU overhead
+
+**Launch:** Included in main bringup
+```yaml
+foxglove_bridge:
+  port: 8765
+  num_threads: 2
+```
 
 ---
 

@@ -68,6 +68,19 @@
           "visible": true,
           "type": "line",
           "lineWidth": 0.04
+        },
+        "/keepout_mask": {
+          "visible": true,
+          "alpha": 0.5,
+          "unknownColor": "#00000000"
+        },
+        "/speed_mask": {
+          "visible": false,
+          "alpha": 0.3,
+          "unknownColor": "#00000000"
+        },
+        "/wheel_odom": {
+          "visible": false
         }
       },
       "publish": {
@@ -132,7 +145,7 @@
     "Plot!battery": {
       "paths": [
         {
-          "value": "/hardware_bridge/power.v_battery",
+          "value": "/power.v_battery",
           "enabled": true,
           "timestampMethod": "receiveTime",
           "label": "Battery (V)",
@@ -140,11 +153,19 @@
           "showLine": true
         },
         {
-          "value": "/hardware_bridge/power.v_charge",
+          "value": "/power.v_charge",
           "enabled": true,
           "timestampMethod": "receiveTime",
           "label": "Charger (V)",
           "color": "#2ecc71",
+          "showLine": true
+        },
+        {
+          "value": "/power.charge_current",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "Charge Current (A)",
+          "color": "#f39c12",
           "showLine": true
         }
       ],
@@ -171,6 +192,53 @@
       "searchTerms": [],
       "minLogLevel": 2,
       "nameFilter": {}
+    },
+    "Indicator!state": {
+      "path": "/behavior_tree_node/high_level_status.state_name",
+      "style": "background",
+      "fallbackColor": "#555555",
+      "fallbackLabel": "UNKNOWN",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "IDLE",
+          "color": "#3498db",
+          "label": "IDLE"
+        },
+        {
+          "operator": "=",
+          "rawValue": "AUTONOMOUS",
+          "color": "#2ecc71",
+          "label": "MOWING"
+        },
+        {
+          "operator": "=",
+          "rawValue": "RECORDING",
+          "color": "#f39c12",
+          "label": "RECORDING"
+        }
+      ]
+    },
+    "Indicator!emergency": {
+      "path": "/behavior_tree_node/high_level_status.emergency",
+      "style": "background",
+      "fallbackColor": "#2ecc71",
+      "fallbackLabel": "OK",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "true",
+          "color": "#e74c3c",
+          "label": "EMERGENCY"
+        }
+      ]
+    },
+    "RawMessages!diagnostics": {
+      "topicPath": "/diagnostics",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false
     }
   },
   "globalVariables": {},
@@ -179,15 +247,25 @@
       "first": "3D!main",
       "second": {
         "first": {
-          "first": "CallService!start_mowing",
+          "first": {
+            "first": "Indicator!state",
+            "second": "Indicator!emergency",
+            "direction": "row",
+            "splitPercentage": 60
+          },
           "second": {
-            "first": "CallService!return_home",
-            "second": "CallService!stop",
+            "first": "CallService!start_mowing",
+            "second": {
+              "first": "CallService!return_home",
+              "second": "CallService!stop",
+              "direction": "column",
+              "splitPercentage": 50
+            },
             "direction": "column",
-            "splitPercentage": 50
+            "splitPercentage": 33
           },
           "direction": "column",
-          "splitPercentage": 33
+          "splitPercentage": 15
         },
         "second": {
           "first": "Publish!teleop",
@@ -201,7 +279,7 @@
           "splitPercentage": 30
         },
         "direction": "column",
-        "splitPercentage": 40
+        "splitPercentage": 45
       },
       "direction": "row",
       "splitPercentage": 75
@@ -213,7 +291,12 @@
         "direction": "row",
         "splitPercentage": 50
       },
-      "second": "Log!rosout",
+      "second": {
+        "first": "Log!rosout",
+        "second": "RawMessages!diagnostics",
+        "direction": "row",
+        "splitPercentage": 60
+      },
       "direction": "column",
       "splitPercentage": 55
     },

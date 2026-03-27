@@ -13,6 +13,7 @@ GHCR_IMAGE    ?= ghcr.io/$(GITHUB_REPOSITORY)/$(DOCKER_IMAGE)
 .PHONY: help build build-debug test clean \
         docker docker-build docker-sim docker-dev \
         run-sim run-sim-gui run-hardware foxglove \
+        dev-sim dev-build dev-build-pkg dev-restart dev-shell \
         lint format format-check \
         deploy backup-maps
 
@@ -35,6 +36,13 @@ help:
 	@echo "  run-sim-gui    Run simulation with Gazebo GUI via noVNC (http://localhost:6080/vnc.html)"
 	@echo "  run-hardware   Run hardware stack via docker compose"
 	@echo "  foxglove       Open Foxglove Studio with the Mowgli layout"
+	@echo ""
+	@echo "Dev simulation (fast iteration with volume mounts):"
+	@echo "  dev-sim        Start dev simulation (edit host → build container → restart)"
+	@echo "  dev-build      Rebuild all packages inside dev container"
+	@echo "  dev-build-pkg  Rebuild single package (PKG=mowgli_behavior)"
+	@echo "  dev-restart    Restart dev simulation (picks up rebuilt code)"
+	@echo "  dev-shell      Open shell inside running dev-sim container"
 	@echo ""
 	@echo "Code quality:"
 	@echo "  lint           Run cppcheck + cpplint on all C++ sources"
@@ -119,6 +127,49 @@ sim-build-pkg:
 
 sim-restart:
 	docker compose restart simulation
+
+# ─── Dev Simulation (volume-mounted source, fast iteration) ──────────────────
+
+dev-sim:
+	@echo "Starting dev simulation (source mounted from host)..."
+	@echo "  Gazebo GUI:      http://localhost:6080/vnc.html"
+	@echo "  Foxglove Studio: ws://localhost:8765"
+	@echo ""
+	@echo "Workflow:"
+	@echo "  1. Edit source files on your host"
+	@echo "  2. make dev-build                       (rebuild all)"
+	@echo "     make dev-build-pkg PKG=mowgli_behavior  (rebuild one)"
+	@echo "  3. make dev-restart                     (restart sim)"
+	@echo ""
+	docker compose up dev-sim
+
+dev-build:
+	@echo "Building all packages inside dev container..."
+	docker compose exec dev-sim bash -c "\
+	  source /opt/ros/$(ROS_DISTRO)/setup.bash && \
+	  cd /ros2_ws && \
+	  colcon build \
+	    --cmake-args -DCMAKE_BUILD_TYPE=Release \
+	    --parallel-workers \$$(nproc) \
+	    --event-handlers console_cohesion+"
+
+dev-build-pkg:
+	@echo "Building $(PKG) inside dev container..."
+	docker compose exec dev-sim bash -c "\
+	  source /opt/ros/$(ROS_DISTRO)/setup.bash && \
+	  source /ros2_ws/install/setup.bash 2>/dev/null; \
+	  cd /ros2_ws && \
+	  colcon build \
+	    --packages-select $(PKG) \
+	    --cmake-args -DCMAKE_BUILD_TYPE=Release \
+	    --parallel-workers \$$(nproc)"
+
+dev-restart:
+	docker compose restart dev-sim
+
+dev-shell:
+	@echo "Opening shell inside dev-sim container..."
+	docker compose exec dev-sim bash
 
 run-sim:
 	@echo "Starting headless simulation..."

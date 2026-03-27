@@ -2,6 +2,8 @@
 
 Complete guide to all configuration files and parameters in the Mowgli ROS2 system.
 
+This documentation is for ROS2 Jazzy with Gazebo Harmonic.
+
 ## Overview
 
 Configuration is centralized in `src/mowgli_bringup/config/`:
@@ -11,8 +13,10 @@ config/
 ├── hardware_bridge.yaml      # Serial protocol parameters
 ├── localization.yaml          # Dual EKF tuning
 ├── nav2_params.yaml           # Navigation stack (planner, controller, costmap)
+├── coverage_planner.yaml      # Coverage path planning parameters
 ├── slam_toolbox.yaml          # SLAM parameters
-└── twist_mux.yaml             # Velocity multiplexer priorities
+├── twist_mux.yaml             # Velocity multiplexer priorities
+└── foxglove_bridge.yaml       # Foxglove Studio visualization bridge
 ```
 
 All YAML files use the ROS2 `ros__parameters` namespace convention. Parameters can be overridden via command-line:
@@ -25,7 +29,85 @@ ros2 launch mowgli_bringup mowgli.launch.py \
 
 ---
 
-## 1. hardware_bridge.yaml
+## 1. foxglove_bridge.yaml
+
+**File:** `src/mowgli_bringup/config/foxglove_bridge.yaml`
+
+**Purpose:** Configure the Foxglove Studio visualization bridge for remote monitoring and debugging.
+
+**Full Example:**
+
+```yaml
+foxglove_bridge:
+  ros__parameters:
+    # Server port for Foxglove Studio client connections
+    port: 8765
+
+    # Enable/disable the WebSocket server
+    enabled: true
+
+    # Maximum number of concurrent WebSocket connections
+    max_connections: 10
+
+    # Message queue size for buffering (prevents dropping data)
+    queue_size: 100
+
+    # Send messages to all connected clients
+    send_buffer_limit: 10000000      # bytes (~10 MB per client)
+
+    # Subscribed topics (publish to all connected clients)
+    subscribed_topics:
+      - /scan                         # LiDAR scan
+      - /odometry/filtered_map        # Robot pose estimate
+      - /costmap/costmap              # Global costmap
+      - /local_costmap/costmap        # Local costmap
+      - /path                         # Global plan
+      - /cmd_vel                      # Velocity commands
+      - /hardware_bridge/status       # Hardware status
+      - /hardware_bridge/power        # Battery voltage
+      - /gps/fix                      # GPS fix data
+      - /imu/data                     # IMU data
+
+    # Camera feed (if available from camera node)
+    # camera_topic: /usb_cam/image_raw
+
+    # Custom transformation frame (if needed)
+    # tf_frame: map
+```
+
+### Key Parameters
+
+#### `port`
+
+- **Type:** integer
+- **Default:** `8765`
+- **Description:** WebSocket server port for Foxglove Studio connections
+- **Note:** Ensure this port is not blocked by firewall on deployment machine
+
+#### `enabled`
+
+- **Type:** boolean
+- **Default:** `true`
+- **Description:** Enable/disable the Foxglove bridge
+- **Use case:** Disable on production for reduced overhead; enable for debugging
+
+#### `max_connections`
+
+- **Type:** integer
+- **Default:** `10`
+- **Description:** Maximum concurrent WebSocket connections
+- **Tuning:** Increase if multiple users need simultaneous access (higher memory overhead)
+
+#### `subscribed_topics`
+
+- **Type:** list of strings
+- **Description:** ROS2 topics to stream to Foxglove clients
+- **Performance:** More topics = higher network bandwidth and CPU load
+- **Typical setup:** Core navigation and hardware status topics (shown above)
+
+---
+
+## 2. hardware_bridge.yaml
 
 **File:** `src/mowgli_bringup/config/hardware_bridge.yaml`
 
@@ -384,20 +466,11 @@ bt_navigator:
     bt_loop_duration: 10                   # ms per tick (100 Hz)
     default_server_timeout: 20             # seconds to wait for action servers
 
-    # Default behavior trees (can be empty to use nav2 defaults)
-    default_nav_to_pose_bt_xml: ""
+    # Custom BT with GoalCheckerSelector for dual-mode navigation
+    default_nav_to_pose_bt_xml: "src/mowgli_bringup/config/navigate_to_pose.xml"
     default_nav_through_poses_bt_xml: ""
 
-    # Standard Nav2 BT plugins (for dynamic node loading)
-    plugin_lib_names:
-      - nav2_compute_path_to_pose_action_bt_node
-      - nav2_follow_path_action_bt_node
-      - nav2_spin_action_bt_node
-      - nav2_wait_action_bt_node
-      - nav2_assisted_teleop_action_bt_node
-      - nav2_back_up_action_bt_node
-      - nav2_drive_on_heading_bt_node
-      # ... (standard Nav2 plugins)
+    # Jazzy auto-loads plugins; no manual registration needed
 ```
 
 #### controller_server Configuration
@@ -408,20 +481,23 @@ controller_server:
     use_sim_time: false
 
     # Update rate of velocity commands to motors
-    controller_frequency: 10.0             # Hz (10 Hz for FTCController)
+    controller_frequency: 10.0             # Hz
 
     # Minimum velocity thresholds (to avoid numerical issues)
     min_x_velocity_threshold: 0.001        # m/s
-    min_y_velocity_threshold: 0.5
+    min_y_velocity_threshold: 0.001
     min_theta_velocity_threshold: 0.001    # rad/s
 
     # Failure tolerance (stop after this duration of failed path tracking)
     failure_tolerance: 0.3                 # seconds
 
-    # Plugin selection
+    # Plugin selection: dual controller setup
     progress_checker_plugins: ["progress_checker"]
-    goal_checker_plugins: ["stopped_goal_checker"]
-    controller_plugins: ["FollowPath"]
+    goal_checker_plugins: ["stopped_goal_checker", "coverage_goal_checker"]
+    controller_plugins: ["FollowPath", "FollowCoveragePath"]
+
+    # Enable stamped velocity commands (Jazzy requirement)
+    enable_stamped_cmd_vel: false
 
     # Progress checker: has robot moved at least 0.5 m in 10 seconds?
     progress_checker:
@@ -436,41 +512,51 @@ controller_server:
       xy_goal_tolerance: 0.25              # m
       yaw_goal_tolerance: 0.25             # rad
 
+    # Coverage goal checker: for mowing pattern termination
+    coverage_goal_checker:
+      plugin: "mowgli_nav2_plugins::CoverageGoalChecker"
+      coverage_radius: 0.5                 # m
+      coverage_tolerance: 0.1              # m
+
     # ─────────────────────────────────────────────────────────────
-    # FTC Local Controller
+    # FollowPath: Rotation-Shim Controller wrapping Regulated Pure Pursuit
     # ─────────────────────────────────────────────────────────────
     FollowPath:
+      plugin: "mowgli_nav2_plugins::RotationShimController"
+      desired_linear_vel: 0.3              # m/s
+      max_linear_vel: 0.5                  # m/s
+      max_angular_vel: 1.0                 # rad/s
+      use_regulated_linear_velocity_scaling: true
+      lookahead_dist: 0.6                  # m
+      min_lookahead_dist: 0.3              # m
+      max_lookahead_dist: 0.9              # m
+      lookahead_time: 1.5                  # seconds
+      rotate_to_heading_angular_vel: 1.57  # rad/s (90°/s)
+      transform_tolerance: 0.1             # seconds
+      use_cost_regulated_linear_velocity_scaling: false
+
+    # ─────────────────────────────────────────────────────────────
+    # FollowCoveragePath: FTC Controller for mowing patterns
+    # ─────────────────────────────────────────────────────────────
+    FollowCoveragePath:
       plugin: "mowgli_nav2_plugins::FTCController"
 
-      # Motion targets
-      desired_linear_vel: 0.3              # m/s (cruising speed for mowing)
-      max_linear_vel: 0.5                  # m/s (safety limit)
+      # Speed profiles
+      speed_fast: 0.4                      # m/s (open areas)
+      speed_slow: 0.15                     # m/s (near obstacles)
+      max_follow_distance: 0.8             # m (lateral offset tolerance)
+
+      # Goal tolerance
+      goal_tolerance: 0.2                  # m
+
+      # Lateral control PID (cross-track error)
+      kp_lat: 2.5                          # Proportional gain
+      ki_lat: 0.3                          # Integral gain
+      kd_lat: 0.1                          # Derivative gain
+
+      # Heading control (via angular velocity)
       max_angular_vel: 1.0                 # rad/s
-
-      # Lookahead distance: how far ahead to look on the path for carrot point
-      lookahead_dist: 0.6                  # m
-      lookahead_max_angle: 0.5             # rad (max heading deviation before rotation)
-
-      # ─────────────────────────────────────────────────────────────
-      # PID Tuning for Linear Velocity
-      # ─────────────────────────────────────────────────────────────
-      linear_p_gain: 2.0
-      linear_i_gain: 0.5
-      linear_d_gain: 0.1
-      linear_max_integral: 0.5             # Anti-windup: max integrated error
-
-      # ─────────────────────────────────────────────────────────────
-      # PID Tuning for Angular Velocity
-      # ─────────────────────────────────────────────────────────────
-      angular_p_gain: 2.0
-      angular_i_gain: 0.5
-      angular_d_gain: 0.1
-      angular_max_integral: 0.5
-
-      # Oscillation recovery: if robot gets stuck, retry navigation
-      use_oscillation_recovery: true
-      oscillation_recovery_min_duration: 5.0    # seconds of stagnation
-      oscillation_recovery_max_cycles: 3        # max recovery attempts
+      angular_acceleration_limit: 2.0      # rad/s²
 ```
 
 #### planner_server Configuration
@@ -597,9 +683,94 @@ local_costmap:
       origin_y: -1.25
 ```
 
+#### velocity_smoother Configuration
+
+The velocity smoother applies acceleration limits to reduce jerky motion:
+
+```yaml
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0              # Hz
+    scale_velocities: false
+    feedback: "odometry"
+    max_velocity: [0.5, 0.0, 0.8]          # [linear_x, linear_y, angular_z]
+    max_accel: [0.4, 0.0, 1.0]             # Acceleration limits (m/s², rad/s²)
+    max_decel: [0.4, 0.0, 1.0]             # Deceleration limits
+    odom_topic: "/odometry/filtered_map"
+    cmd_vel_in_topic: "/cmd_vel"
+    cmd_vel_out_topic: "/cmd_vel_smoothed"
+```
+
 ---
 
-## 4. slam_toolbox.yaml
+## 4. coverage_planner.yaml
+
+**File:** `src/mowgli_bringup/config/coverage_planner.yaml`
+
+**Purpose:** Configure the autonomous mowing coverage planner.
+
+**Full Configuration:**
+
+```yaml
+coverage_planner:
+  ros__parameters:
+    # Headland (boundary pass) parameters
+    headland_passes: 3                     # Number of passes around the perimeter
+    headland_width: 0.5                    # m (how far from boundary)
+
+    # Tool and cutting parameters
+    tool_width: 0.55                       # m (mowing deck width)
+    cutting_height: 0.08                   # m (grass cutting height)
+
+    # Mowing pattern
+    mowing_angle: 0.0                      # rad (direction of mowing rows; 0 = North-South)
+    mowing_angle_variance: 0.2             # rad (random offset per pass)
+    row_spacing: 0.5                       # m (distance between passes)
+
+    # Robot constraints
+    min_turning_radius: 0.4                # m (minimum curvature radius)
+    max_angular_vel: 1.0                   # rad/s
+    goal_tolerance: 0.3                    # m
+
+    # Optimization
+    use_coverage_goal_checker: true        # Use CoverageGoalChecker instead of StoppedGoalChecker
+    optimize_path_smoothness: true
+```
+
+### Key Parameters
+
+#### `headland_passes`
+
+- **Type:** integer
+- **Default:** `3`
+- **Description:** Number of passes around yard perimeter before mowing interior
+- **Rationale:** Ensures boundary coverage and creates safety margin before interior work
+
+#### `tool_width`
+
+- **Type:** double (m)
+- **Default:** `0.55`
+- **Description:** Physical width of mowing deck
+- **Use case:** Row spacing auto-calculated as `tool_width * 0.95` (5% overlap for safety)
+
+#### `mowing_angle`
+
+- **Type:** double (radians)
+- **Default:** `0.0`
+- **Range:** `0.0` to `6.28` (0° to 360°)
+- **Description:** Preferred direction of mowing rows (0 = North-South, π/2 = East-West)
+- **Tuning:** Adjust based on field topography to minimize drift on slopes
+
+#### `min_turning_radius`
+
+- **Type:** double (m)
+- **Default:** `0.4`
+- **Description:** Minimum radius the robot can execute (physical constraint)
+- **Must match:** Robot wheelbase and max angular velocity: `radius = linear_vel / angular_vel`
+
+---
+
+## 5. slam_toolbox.yaml
 
 **File:** `src/mowgli_bringup/config/slam_toolbox.yaml`
 
@@ -721,7 +892,7 @@ minimum_travel_distance: 0.2
 
 ---
 
-## 5. twist_mux.yaml
+## 6. twist_mux.yaml
 
 **File:** `src/mowgli_bringup/config/twist_mux.yaml`
 

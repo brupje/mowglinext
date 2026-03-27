@@ -553,6 +553,7 @@ BT::NodeStatus FollowCoveragePath::onRunning()
     FollowPathAction::Goal goal_msg;
     goal_msg.path = latest_path_;
     goal_msg.controller_id = "FollowCoveragePath";
+    goal_msg.goal_checker_id = "coverage_goal_checker";
 
     auto send_goal_options = rclcpp_action::Client<FollowPathAction>::SendGoalOptions{};
     goal_handle_future_ = action_client_->async_send_goal(goal_msg, send_goal_options);

@@ -1,16 +1,17 @@
 # Simulation Guide
 
-This guide explains how to run the Mowgli ROS2 system in Gazebo Ignition simulation for testing and development without physical hardware.
+This guide explains how to run the Mowgli ROS2 system in Gazebo Harmonic simulation using Docker containers for testing and development without physical hardware.
 
 ## Overview
 
 The simulation provides:
 
-- **Virtual Mowgli robot** in a realistic Gazebo Ignition environment
+- **Virtual Mowgli robot** in a realistic Gazebo Harmonic environment
 - **Simulated sensors:** LiDAR (2D laser scan), IMU (accelerometer + gyroscope), wheel odometry
 - **Physics simulation:** Motor torques, friction, collision detection
-- **ROS2 bridging:** Full integration with the ROS2 navigation stack
+- **ROS2 Jazzy integration:** Full integration with the ROS2 navigation stack
 - **Repeatable scenarios:** Consistent environment for testing mowing patterns and navigation
+- **Docker-based workflow:** Containerized simulation eliminates environment conflicts
 
 **What's NOT simulated:**
 - RTK-GPS (can be mocked via GPS pose converter)
@@ -20,287 +21,181 @@ The simulation provides:
 
 ## Requirements
 
-### Software
-- **ROS2 Humble** (latest, with `ament_cmake`)
-- **Gazebo Ignition Fortress** or newer
-- **ros_gz_sim** and **ros_gz_bridge** packages
-- **mowgli_ros2** source (fully built)
+### Docker & Compose
+- **Docker Engine** 20.10+
+- **Docker Compose** 2.0+
+- **Host ports available:** 6080 (noVNC), 8765 (Foxglove WebSocket)
 
 ### System
 - **CPU:** Multi-core processor (8+ cores recommended)
 - **RAM:** 4 GB minimum, 8 GB recommended
-- **GPU:** Optional (Ignition rendering faster with GPU, CPU fallback available)
-- **Disk:** ~500 MB for Gazebo installation
+- **GPU:** Optional (faster rendering with GPU, CPU fallback available)
+- **Disk:** ~5 GB for Docker images
 
-### Installation
-
-```bash
-# Install Gazebo Ignition (Ubuntu 22.04)
-sudo apt-get update
-sudo apt-get install ignition-fortress
-
-# Install ROS2 Gazebo bridges
-sudo apt-get install ros-humble-ros-gz-sim ros-humble-ros-gz-bridge
-
-# Verify installation
-ign gazebo --help
-ros2 launch ros_gz_sim gz_sim.launch.py
-```
+### No Bare-Metal Installation Required
+All dependencies (ROS2 Jazzy, Gazebo Harmonic, tools) are containerized. No installation on your host system needed.
 
 ## Quick Start
 
-### 1. Build the Project
+### 1. Build Docker Images
 
 ```bash
-cd ~/ros2_ws
-colcon build --symlink-install --packages-select mowgli_bringup mowgli_hardware mowgli_localization mowgli_nav2_plugins mowgli_behavior
-source install/setup.bash
+cd ~/mowgli-ros2/mowgli_ros2
+
+# Build production image (for GUI + noVNC)
+make build-sim-gui
+
+# Build development image (for iterative development)
+make build-dev-sim
 ```
 
-### 2. Launch Simulation
+### 2. Run Simulation with GUI
+
+Production mode with Gazebo GUI accessible via browser:
 
 ```bash
-ros2 launch mowgli_bringup simulation.launch.py
+make run-sim-gui
 ```
 
-**First launch will take 30–60 seconds** (Gazebo initialization, plugin loading).
-
-**Console output:**
+**Output:**
 ```
-[robot_state_publisher-1] [INFO] Starting robot state publisher
-[gazebo-1] [INFO] Starting gazebo server
-[spawn_mowgli-1] [INFO] Spawning model 'mowgli' at pose (0.0, 0.0, 0.1)
-[gz_ros2_bridge-1] [INFO] Bridging ROS 2 <-> Gazebo
-[joint_state_publisher-1] [INFO] Publishing joint states for wheels
+Starting mowgli_simulation_gui container...
+noVNC available at: http://localhost:6080/vnc.html
+Foxglove WebSocket: ws://localhost:8765
+Simulation running...
 ```
 
-**Window opens with 3D simulation view (Gazebo GUI).**
+**Access:**
+- **noVNC GUI:** Open http://localhost:6080/vnc.html in your browser (Gazebo 3D view)
+- **Foxglove Studio:** Connect to ws://localhost:8765 in Foxglove or load layout from `foxglove/mowgli_sim.json`
 
-### 3. Verify Topics are Publishing
+### 3. Run Development Simulation
 
-In a new terminal:
+Development mode with source volume mounts for fast iteration:
 
 ```bash
-source ~/ros2_ws/install/setup.bash
-
-# Check sensor topics
-ros2 topic list | grep -E "scan|imu|odom"
-# Expected output:
-#   /scan
-#   /imu/data
-#   /wheel_odom
-#   /odometry/filtered_odom
-#   /odometry/filtered_map
-#   /tf
-
-# Verify data is flowing
-ros2 topic echo /scan --no-arr (limit output)
-ros2 topic echo /odometry/filtered_odom --no-arr
+make dev-sim
 ```
 
-### 4. Send Navigation Goal
+This container has your source code mounted at `/ros2_ws/src/`, allowing you to:
+- Edit source on your host machine
+- Rebuild packages inside the container without losing changes
+- See simulation updates immediately after rebuild
 
-From a third terminal:
+### 4. Test in Development Container
+
+In the dev container shell:
 
 ```bash
-source ~/ros2_ws/install/setup.bash
+# Build a single package (fast rebuild)
+make dev-build-pkg PKG=mowgli_behavior
 
-# Bring up Nav2 (in background)
-ros2 launch nav2_bringup navigation_launch.py use_sim_time:=true &
+# Restart simulation services
+make dev-restart
 
-# Wait a few seconds for Nav2 to initialize...
-sleep 3
+# Open a shell in the running container
+make dev-shell
 
-# Send a goal (relative to spawning position)
-ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "pose: {header: {frame_id: 'map'}, pose: {position: {x: 5.0, y: 5.0, z: 0.0}, orientation: {w: 1.0}}}"
+# View logs
+make dev-logs
 ```
 
-**Robot should move toward the goal in the Gazebo window.**
+## Accessing Simulation
 
-## Launch File Arguments
+### GUI Access (noVNC)
 
-### Customize Spawn Position
+Open **http://localhost:6080/vnc.html** in your browser.
+
+**Controls in Gazebo (inside noVNC):**
+- **Mouse wheel:** Zoom in/out
+- **Right-click drag:** Pan camera
+- **Middle-click drag:** Rotate view
+- **G:** Toggle grid
+- **T:** Toggle collision shapes (debug mode)
+- **V:** Cycle camera view
+- **?:** Show all hotkeys
+
+### Visualization (Foxglove Studio)
+
+1. Open [Foxglove Studio](https://foxglove.dev/) (web or desktop app)
+2. Click "Open Connection"
+3. Select "Rosbridge (ROS 1/ROS 2)" and enter: **ws://localhost:8765**
+4. Import layout from `foxglove/mowgli_sim.json` (pre-configured with panels for LiDAR, odometry, transforms, status)
+
+**Foxglove displays:**
+- 3D view with robot pose and sensor data
+- LiDAR point cloud (/scan)
+- IMU accelerometer/gyroscope (/imu/data)
+- Odometry and transform tree (/tf)
+- Behavior tree state (if running)
+- Command velocity monitoring
+
+## Full Mowing Cycle Test
+
+Complete test of behavior tree control:
 
 ```bash
-ros2 launch mowgli_bringup simulation.launch.py \
-    spawn_x:=1.0 \
-    spawn_y:=2.0 \
-    spawn_z:=0.1 \
-    spawn_yaw:=0.785  # 45 degrees
+# Terminal 1: Start simulation with GUI
+make run-sim-gui
+# Wait for "Simulation running..." message
+
+# Terminal 2: Send high-level control command
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 service call /behavior_tree_node/high_level_control \
+    mowgli_interfaces/srv/HighLevelControl \
+    '{command: 1}'"
 ```
 
-### Use Custom World
+**Available commands:**
+- `command: 1` → START (begin mowing cycle)
+- `command: 2` → HOME (return to home position)
+- `command: 3` → S1 (recording mode)
+
+**Monitor the behavior tree:**
 
 ```bash
-ros2 launch mowgli_bringup simulation.launch.py \
-    world:=/path/to/custom_world.sdf
+# In another terminal
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic echo /behavior_tree_node/status"
 ```
 
-### Disable GUI (Headless Mode)
+## World Environments
 
-```bash
-ros2 launch mowgli_bringup simulation.launch.py \
-    headless:=true
-```
+### Garden World (Default)
 
-**Useful for CI/CD testing or running on remote servers.**
+The default world includes obstacles and realistic garden layout:
 
-## Gazebo Keyboard Controls
+**Location:** `src/mowgli_simulation/worlds/garden.sdf`
 
-While the Gazebo window is active:
+Features:
+- 10m × 10m grass area (green plane)
+- Obstacles (walls, trees) for navigation testing
+- Proper lighting and physics
 
-| Key | Function |
-|-----|----------|
-| `G` | Toggle grid |
-| `T` | Toggle collision shapes (debug) |
-| `V` | Cycle camera view |
-| `O` | Show odometry (IMU, wheel ticks) |
-| `?` | Show all hotkeys |
-| Scroll | Zoom in/out |
-| Right-click drag | Pan camera |
-| Middle-click drag | Rotate view |
+To verify it's loaded, check noVNC view or Foxglove 3D display.
 
-## RViz2 Visualization
+### Custom Worlds
 
-Run RViz in parallel to visualize the ROS2 side:
+To create a custom world:
 
-```bash
-# Terminal 1: Launch simulation
-ros2 launch mowgli_bringup simulation.launch.py
+1. Create a new `.sdf` file in `src/mowgli_simulation/worlds/`
+2. Update the simulation launch configuration to point to your world
+3. Rebuild the Docker image if you want it included in the production image
 
-# Terminal 2: Launch RViz
-rviz2 -d src/mowgli_bringup/config/mowgli.rviz
-```
-
-**RViz displays:**
-- `/map` (SLAM-generated map, if SLAM is running)
-- `/scan` (LiDAR point cloud)
-- `/tf_tree` (robot transform tree)
-- `/odometry/filtered_map` (robot pose estimate)
-- `/cmd_vel` (velocity commands)
-- Robot model with joint states
-
-**You can now:**
-- Use RViz "Nav2 Goal" tool to send goals with the mouse
-- Monitor localization convergence
-- Debug SLAM loop closures
-- Track path planning in real-time
-
-## Common Workflows
-
-### Workflow 1: Test Navigation Stack
-
-```bash
-# Terminal 1: Simulation
-ros2 launch mowgli_bringup simulation.launch.py
-
-# Terminal 2: RViz for visualization
-rviz2 -d src/mowgli_bringup/config/mowgli.rviz
-
-# Terminal 3: Launch Nav2 + SLAM (optional)
-ros2 launch nav2_bringup navigation_launch.py use_sim_time:=true
-
-# Terminal 4: Send goals from RViz (click "Nav2 Goal" in RViz toolbar)
-# or manually via:
-ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "pose: {header: {frame_id: 'map'}, pose: {position: {x: 3.0, y: 3.0}, orientation: {w: 1.0}}}"
-```
-
-### Workflow 2: Test BehaviorTree Control
-
-```bash
-# Terminal 1: Simulation
-ros2 launch mowgli_bringup simulation.launch.py
-
-# Terminal 2: RViz
-rviz2 -d src/mowgli_bringup/config/mowgli.rviz
-
-# Terminal 3: Launch full stack (Nav2 + BehaviorTree)
-ros2 launch mowgli_bringup mowgli.launch.py use_sim_time:=true
-
-# Terminal 4: Trigger mowing behavior
-ros2 service call /mowgli_behavior/set_mode std_srvs/SetBool "{data: true}"
-
-# Monitor behavior in another terminal:
-ros2 topic echo /hardware_bridge/status
-```
-
-### Workflow 3: SLAM Mapping
-
-```bash
-# Terminal 1: Simulation
-ros2 launch mowgli_bringup simulation.launch.py
-
-# Terminal 2: Bring up SLAM (maps during navigation)
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true
-
-# Terminal 3: RViz
-rviz2 -d src/mowgli_bringup/config/mowgli.rviz
-
-# Terminal 4: Send goals to drive around and build map
-ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "pose: {header: {frame_id: 'map'}, pose: {position: {x: 5.0, y: 0.0}, orientation: {w: 1.0}}}"
-
-# Save map after exploration
-ros2 run nav2_map_server map_saver_cli -f ~/mowgli_map
-```
-
-## Simulated Topics
-
-### Gazebo → ROS2 (Bridged via ros_gz_bridge)
-
-| Topic | Type | Publisher | Rate | Description |
-|-------|------|-----------|------|-------------|
-| `/clock` | rosgraph_msgs/Clock | Gazebo | 1000 Hz | Simulation time (use_sim_time) |
-| `/scan` | sensor_msgs/LaserScan | gz_bridge | 5 Hz | Virtual 2D LiDAR scan |
-| `/imu/data` | sensor_msgs/Imu | gz_bridge | 100 Hz | IMU accelerometer + gyro |
-| `/wheel_odom` | nav_msgs/Odometry | gz_bridge | 50 Hz | Wheel encoder + odometry |
-| `/cmd_vel` | geometry_msgs/Twist | (ROS → Gazebo) | – | Motor velocity commands |
-
-### ROS2 → Gazebo (Hardware bridge simulation)
-
-In the actual deployment, `/cmd_vel` goes to hardware_bridge → STM32 → motors.
-
-In simulation, `/cmd_vel` is bridged directly to Gazebo physics for wheel actuation.
-
-**No hardware_bridge node needed in simulation** (launch files handle this automatically).
-
-### Standard ROS2 Topics (Same as Hardware)
-
-| Topic | Type | Purpose |
-|-------|------|---------|
-| `/odometry/filtered_odom` | nav_msgs/Odometry | Fused wheel + IMU odometry (EKF) |
-| `/odometry/filtered_map` | nav_msgs/Odometry | Fused odometry + GPS (EKF) |
-| `/tf` | – | Transform tree (map → odom → base_link) |
-
-## Gazebo World Description
-
-### World SDF Structure
-
-The simulation uses an SDF (Simulation Description Format) world file.
-
-**Default world:** `empty.sdf` (minimal environment)
-
-**Example custom world (mowgli_world.sdf):**
-
+**Example custom world structure:**
 ```xml
 <?xml version="1.0"?>
 <sdf version="1.9">
-  <world name="mowgli_yard">
-    <!-- Physics engine -->
+  <world name="custom_yard">
     <physics name="default" type="dart">
       <gravity>0 0 -9.81</gravity>
       <max_step_size>0.001</max_step_size>
     </physics>
 
-    <!-- Lighting -->
-    <scene>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.7 0.7 0.7 1</background>
-    </scene>
-
-    <!-- Terrain (grass) -->
     <model name="ground">
       <static>true</static>
       <link name="link">
@@ -308,7 +203,7 @@ The simulation uses an SDF (Simulation Description Format) world file.
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>50 50</size>
+              <size>20 20</size>
             </plane>
           </geometry>
         </collision>
@@ -316,239 +211,316 @@ The simulation uses an SDF (Simulation Description Format) world file.
           <geometry>
             <plane>
               <normal>0 0 1</normal>
-              <size>50 50</size>
+              <size>20 20</size>
             </plane>
           </geometry>
           <material>
-            <ambient>0.2 0.5 0.2 1</ambient>  <!-- Green -->
-            <diffuse>0.2 0.5 0.2 1</diffuse>
+            <ambient>0.2 0.5 0.2 1</ambient>
           </material>
         </visual>
       </link>
     </model>
 
-    <!-- Obstacle: wall -->
-    <model name="obstacle_wall">
-      <static>true</static>
-      <pose>10 0 0 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.1 5 1</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.1 5 1</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.5 0.5 0.5 1</ambient>
-          </material>
-        </visual>
-      </link>
-    </model>
+    <!-- Add obstacles, models, lighting, etc. -->
   </world>
 </sdf>
 ```
 
-To use:
-```bash
-ros2 launch mowgli_bringup simulation.launch.py world:=mowgli_world.sdf
-```
+## Development Workflow
 
-## Troubleshooting
-
-### Issue 1: "Gazebo is taking forever to start"
-
-**Cause:** First launch loads plugins and shaders.
-
-**Solution:** Be patient (30–60 seconds normal). Subsequent launches are faster.
-
-### Issue 2: "/cmd_vel not received by Gazebo"
-
-**Cause:** ros_gz_bridge not properly bridging command topics.
-
-**Check:**
-```bash
-# Verify bridge is running
-ros2 node list | grep gz
-
-# Check bridge topics
-ros2 topic list | grep cmd_vel
-```
-
-**Fix:** Restart the bridge:
-```bash
-ros2 launch ros_gz_sim gz_sim.launch.py
-```
-
-### Issue 3: "Simulation time not synchronized (use_sim_time=false)"
-
-**Cause:** `/clock` bridge not active.
-
-**Check:**
-```bash
-ros2 topic echo /clock --no-arr
-# Should show timestamps, not "No messages"
-```
-
-**Fix:** Ensure `use_sim_time: true` is set in launch arguments.
-
-### Issue 4: "Robot doesn't move when I send cmd_vel"
-
-**Cause:** Motor control plugin not properly configured, or physics settings too high friction.
-
-**Check:**
-```bash
-# Monitor what Gazebo is receiving
-ros2 topic echo /cmd_vel
-# Should show velocity commands
-
-# Monitor actual odometry
-ros2 topic echo /wheel_odom
-# Should show changing position
-```
-
-**Fix:** Check Gazebo physics settings (increase max_step_size, reduce friction):
-
-```yaml
-# In world SDF
-<physics>
-  <max_step_size>0.01</max_step_size>
-  <friction>
-    <coefficient>0.1</coefficient>
-  </friction>
-</physics>
-```
-
-### Issue 5: "RViz can't find /map or /scan"
-
-**Cause:** SLAM not running, or bridge not bridging laser data.
-
-**Solution:**
-- Start SLAM: `ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true`
-- Verify /scan is publishing: `ros2 topic echo /scan --no-arr`
-- In RViz, check fixed frame and add tf plugin
-
-## Integration Testing Examples
-
-### Test 1: Drive in Square Pattern
+### Edit and Rebuild in Development Mode
 
 ```bash
-# Terminal 1: Simulation
+# Terminal 1: Start dev container
+make dev-sim
+
+# Terminal 2: Edit your code
+# e.g., modify src/mowgli_behavior/src/behavior_tree.cpp
+
+# Terminal 3: Rebuild package inside container
+make dev-build-pkg PKG=mowgli_behavior
+
+# Watch noVNC (http://localhost:6080/vnc.html) to see changes take effect
+# Or restart simulation:
+make dev-restart
+```
+
+### Interactive Development Shell
+
+For direct container access:
+
+```bash
+make dev-shell
+
+# Now you're inside the container
+cd /ros2_ws
+colcon build --packages-select mowgli_behavior
+source install/setup.bash
 ros2 launch mowgli_bringup simulation.launch.py
-
-# Terminal 2: Send goals in sequence
-for i in {1..4}; do
-  x=$((i * 2))
-  y=0
-  echo "Goal $i: ($x, $y)"
-  ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
-    "pose: {header: {frame_id: 'map'}, pose: {position: {x: $x, y: 0}, orientation: {w: 1.0}}}"
-  sleep 10
-done
 ```
 
-### Test 2: Measure Localization Drift
+### Logging and Debugging
 
 ```bash
-# Terminal 1: Simulation
-ros2 launch mowgli_bringup simulation.launch.py
+# View container logs
+make dev-logs
 
-# Terminal 2: Record odometry
-ros2 bag record -o test_drift /odometry/filtered_odom /wheel_odom /tf --duration 60
+# Check ROS2 nodes running inside container
+docker exec mowgli_simulation_dev bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 node list"
 
-# Terminal 3: Send goal and let robot drive
-ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "pose: {header: {frame_id: 'map'}, pose: {position: {x: 10.0, y: 10.0}, orientation: {w: 1.0}}}"
-
-# Post-analysis:
-# Compare wheel_odom vs. filtered_odom drift over time
-ros2 bag info test_drift_0/
+# Echo a specific topic
+docker exec mowgli_simulation_dev bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic echo /scan --no-arr"
 ```
 
-### Test 3: SLAM Accuracy
+## ROS2 Topics and Services
+
+### Bridged Topics (Gazebo → ROS2)
+
+| Topic | Type | Rate | Description |
+|-------|------|------|-------------|
+| `/clock` | rosgraph_msgs/Clock | 1000 Hz | Simulation time (use_sim_time) |
+| `/scan` | sensor_msgs/LaserScan | 5 Hz | 2D LiDAR scan |
+| `/imu/data` | sensor_msgs/Imu | 100 Hz | IMU (accelerometer + gyroscope) |
+| `/wheel_odom` | nav_msgs/Odometry | 50 Hz | Wheel encoder odometry |
+| `/cmd_vel` | geometry_msgs/Twist | – | Motor velocity commands (ROS → Gazebo) |
+
+### ROS2 Processed Topics
+
+| Topic | Type | Purpose |
+|-------|------|---------|
+| `/odometry/filtered_odom` | nav_msgs/Odometry | Fused wheel + IMU (EKF) |
+| `/odometry/filtered_map` | nav_msgs/Odometry | Fused odometry + GPS (EKF) |
+| `/tf` | tf2_msgs/TFMessage | Transform tree (map → odom → base_link) |
+
+### High-Level Control Service
 
 ```bash
-# Terminal 1: Simulation with SLAM
-ros2 launch mowgli_bringup simulation.launch.py
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=true &
+ros2 service call /behavior_tree_node/high_level_control \
+  mowgli_interfaces/srv/HighLevelControl \
+  '{command: 1}'
 
-# Terminal 2: RViz
-rviz2 -d src/mowgli_bringup/config/mowgli.rviz
+# 1 = START
+# 2 = HOME
+# 3 = S1 (recording)
+```
 
-# Terminal 3: Drive a large loop (should close with <0.5 m error)
-# Use RViz goal tool or script to send goals forming a loop
-# Observe /map in RViz for loop closure artifact
+### Monitor Behavior Tree Status
 
-# Save map
-ros2 run nav2_map_server map_saver_cli -f ~/mowgli_test_map
+```bash
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic echo /behavior_tree_node/status"
 ```
 
 ## Performance Tuning
 
-### Reduce CPU Usage
+### Optimize CPU Usage
+
+Development mode runs lighter than production. Use `make dev-sim` for iterative work.
+
+Production mode can be optimized:
+```bash
+# Reduce sensor frequencies in launch configuration
+# Lower /scan rate from 5 Hz to 2 Hz
+# Lower /imu rate from 100 Hz to 50 Hz
+# Reduces CPU load and network overhead
+```
+
+### GPU Acceleration
+
+Docker simulation can use GPU if available:
 
 ```bash
-# Disable GUI (headless)
-ros2 launch mowgli_bringup simulation.launch.py headless:=true
-
-# Reduce sensor frequencies (in config files)
-# E.g., /scan from 5 Hz → 1 Hz
-# Reduces bridge overhead
+# Modify docker-compose.yml to include:
+# runtime: nvidia
+# and rebuild
+make build-sim-gui
 ```
 
-### Faster Real-time Factor
+Check Gazebo rendering speed in noVNC. GPU provides 2-3x faster rendering.
 
-Real-time factor = simulation speed / wall clock time.
+## Container Management
 
-Target: 1.0 or higher (simulation runs faster than real-time).
-
-**Tuning:**
-```bash
-# In launch file, increase max_step_size
-# But be careful: too large → physics instability
-
-# Typical: 0.001 s (1 ms) per step for stable dynamics
-# Can increase to 0.005 s if collision detection is less critical
-```
-
-## Docker Deployment
-
-Simulate in a Docker container (useful for CI/CD):
+### Stop Containers
 
 ```bash
-# Build Docker image
-docker compose build simulation
+# Stop production container
+docker stop mowgli_simulation_gui
 
-# Run simulation (headless)
-docker compose run --rm simulation \
-  ros2 launch mowgli_bringup simulation.launch.py headless:=true
+# Stop development container
+docker stop mowgli_simulation_dev
+
+# Stop and remove everything
+docker compose down
 ```
 
-**docker-compose.yml (example):**
-```yaml
-services:
-  simulation:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - ROS_DOMAIN_ID=0
-      - ROS_LOCALHOST_ONLY=1
-    volumes:
-      - ./src:/workspace/src
-    command: >
-      bash -c "
-        source /opt/ros/humble/setup.bash &&
-        source /workspace/install/setup.bash &&
-        ros2 launch mowgli_bringup simulation.launch.py headless:=true
-      "
+### View Running Containers
+
+```bash
+docker ps | grep mowgli_simulation
 ```
+
+### Access Container Filesystem
+
+```bash
+# Explore container
+docker exec -it mowgli_simulation_gui bash
+
+# Copy files from container
+docker cp mowgli_simulation_gui:/ros2_ws/install/lib /tmp/extracted_lib
+
+# View container logs
+docker logs -f mowgli_simulation_gui
+```
+
+## Troubleshooting
+
+### Issue: noVNC Not Accessible (http://localhost:6080/vnc.html)
+
+**Solution:**
+- Check port isn't already in use: `lsof -i :6080`
+- Verify container is running: `docker ps | grep mowgli_simulation_gui`
+- Check firewall settings (if on remote machine)
+- Wait 30 seconds after starting container for VNC to initialize
+
+### Issue: Foxglove WebSocket Connection Failed (ws://localhost:8765)
+
+**Cause:** WebSocket bridge not running or port blocked.
+
+**Check:**
+```bash
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 node list | grep bridge"
+```
+
+**Solution:**
+- Restart container: `make run-sim-gui`
+- Check firewall: `lsof -i :8765`
+- Verify ROS2 domain ID matches (should be 0)
+
+### Issue: Robot Doesn't Appear in Gazebo
+
+**Check:**
+```bash
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic list | grep -E 'scan|odom|cmd_vel'"
+```
+
+**Solution:**
+- Wait 10-15 seconds for Gazebo to initialize model spawn
+- Check simulation logs: `make dev-logs` (if using dev mode)
+- Rebuild and restart: `make dev-build && make dev-restart`
+
+### Issue: Slow Rendering or CPU Maxed Out
+
+**Solution:**
+- Use `make dev-sim` instead of production image (lighter)
+- Reduce sensor rates in configuration
+- Close unnecessary applications on host
+- Check GPU acceleration is enabled (if available)
+
+### Issue: Cannot Connect to Development Container
+
+**Check:**
+```bash
+docker ps -a | grep mowgli_simulation_dev
+docker logs mowgli_simulation_dev
+```
+
+**Solution:**
+- Rebuild: `make build-dev-sim`
+- Restart: `make dev-sim`
+- Check disk space: `docker system df`
+
+### Issue: Source Edits Don't Take Effect in Dev Mode
+
+**Solution:**
+```bash
+# Rebuild the specific package
+make dev-build-pkg PKG=mowgli_behavior
+
+# Or full rebuild
+make dev-build
+
+# Restart simulation
+make dev-restart
+```
+
+## Integration Testing Examples
+
+### Test 1: Full Mowing Cycle
+
+```bash
+# Terminal 1
+make run-sim-gui
+
+# Terminal 2 (after 30 seconds for Gazebo to load)
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 service call /behavior_tree_node/high_level_control \
+    mowgli_interfaces/srv/HighLevelControl '{command: 1}'"
+
+# Terminal 3: Monitor behavior
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic echo /behavior_tree_node/status"
+```
+
+Open noVNC (http://localhost:6080/vnc.html) to watch robot execute mowing pattern.
+
+### Test 2: LiDAR Sensor Verification
+
+```bash
+# Terminal 1
+make run-sim-gui
+
+# Terminal 2: Record laser scan
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 topic echo /scan --no-arr | head -20"
+```
+
+Verify scan data shows valid ranges and angles.
+
+### Test 3: Odometry and Localization
+
+```bash
+# Terminal 1
+make run-sim-gui
+
+# Terminal 2: Start recording odometry data
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 bag record -o test_odom_0 \
+    /odometry/filtered_odom \
+    /wheel_odom \
+    /tf \
+    --duration 30"
+
+# Terminal 3: Send navigation goal
+docker exec mowgli_simulation_gui bash -c "\
+  source /opt/ros/jazzy/setup.bash && \
+  source /ros2_ws/install/setup.bash && \
+  ros2 action send_goal navigate_to_pose nav2_msgs/action/NavigateToPose \
+    'pose: {header: {frame_id: \"map\"}, pose: {position: {x: 5.0, y: 5.0}, orientation: {w: 1.0}}}'"
+```
+
+Analyze recorded data for drift and localization convergence.
 
 ## Next Steps
 
@@ -558,4 +530,4 @@ services:
 
 ---
 
-**Happy simulating!** 🤖
+**Happy simulating!**

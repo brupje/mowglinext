@@ -129,7 +129,7 @@ services:
     command: ["ros2", "launch", "mowgli_bringup", "navigation.launch.py"]
 
   # --------------------------------------------------------------------------
-  # dev — interactive development container.
+  # dev — interactive development container (shell only).
   # Source tree is bind-mounted so colcon builds see live changes without
   # rebuilding the image. A ccache volume speeds up incremental compilation.
   # --------------------------------------------------------------------------
@@ -139,21 +139,54 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-      target: dev
     environment:
       <<: *ros-env
       RCUTILS_LOGGING_SEVERITY_THRESHOLD: DEBUG
     network_mode: host
     volumes:
       - ./src:/ros2_ws/src
-      - ./build:/ros2_ws/build
-      - ./install:/ros2_ws/install
-      - ./log:/ros2_ws/log
+      - ./foxglove:/ros2_ws/foxglove
+      - dev_build:/ros2_ws/build
+      - dev_install:/ros2_ws/install
+      - dev_log:/ros2_ws/log
       - mowgli_maps:/ros2_ws/maps
       - mowgli_ccache:/ccache
     stdin_open: true
     tty: true
     command: ["bash"]
+
+  # --------------------------------------------------------------------------
+  # dev-sim — Development simulation with live source mounts.
+  # Edit source on your host, rebuild inside the container, restart the sim.
+  #   make dev-sim          Start simulation with volume mounts
+  #   make dev-build        Rebuild all packages inside dev-sim
+  #   make dev-build-pkg PKG=mowgli_behavior   Rebuild one package
+  #   make dev-restart      Restart simulation (picks up rebuilt code)
+  # Gazebo GUI: http://localhost:6080/vnc.html
+  # Foxglove:   ws://localhost:8765
+  # --------------------------------------------------------------------------
+  dev-sim:
+    container_name: mowgli_dev_sim
+    image: mowgli-ros2:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      <<: *ros-env
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    ports:
+      - "8765:8765"   # Foxglove Bridge WebSocket
+      - "6080:6080"   # noVNC web client
+    volumes:
+      - ./src:/ros2_ws/src
+      - ./foxglove:/ros2_ws/foxglove
+      - dev_build:/ros2_ws/build
+      - dev_install:/ros2_ws/install
+      - dev_log:/ros2_ws/log
+      - mowgli_maps:/ros2_ws/maps
+      - mowgli_ccache:/ccache
+    restart: unless-stopped
+    entrypoint: ["/ros2_ws/scripts/start_dev_sim.sh"]
 
 # ---------------------------------------------------------------------------
 # Named volumes
@@ -173,4 +206,12 @@ volumes:
   sim_install:
     driver: local
   sim_log:
+    driver: local
+
+  # Dev container build artifacts (shared between dev and dev-sim)
+  dev_build:
+    driver: local
+  dev_install:
+    driver: local
+  dev_log:
     driver: local

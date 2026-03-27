@@ -23,6 +23,7 @@ from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
 )
+from launch.conditions import UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -113,18 +114,19 @@ def generate_launch_description() -> LaunchDescription:
         ),
         launch_arguments={
             "use_sim_time": "true",
-            "slam": "False",
+            "slam": slam,
             "map": map_yaml,
             "use_ekf": "False",
         }.items(),
     )
 
     # ------------------------------------------------------------------
-    # 2b. Static map→odom TF (identity) for simulation
-    #     In simulation without SLAM, Nav2 still needs the map→odom TF.
-    #     Gazebo provides odom→base_link via the diff-drive plugin.
+    # 2b. Static map→odom TF (identity) for simulation without SLAM
+    #     When SLAM is enabled, slam_toolbox provides the map→odom TF.
+    #     When SLAM is disabled, we publish a static identity transform.
     # ------------------------------------------------------------------
     static_map_odom_tf = Node(
+        condition=UnlessCondition(slam),
         package="tf2_ros",
         executable="static_transform_publisher",
         name="static_map_odom_tf",

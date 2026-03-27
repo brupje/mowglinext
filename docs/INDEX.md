@@ -1,6 +1,8 @@
 # Mowgli ROS2 Documentation Index
 
-Welcome to the comprehensive documentation for the Mowgli ROS2 project—a complete rewrite of OpenMower in ROS2 Humble with modern navigation, SLAM, and behavior tree control.
+Welcome to the comprehensive documentation for the Mowgli ROS2 project—a complete rewrite of OpenMower in ROS2 Jazzy with modern navigation, SLAM, behavior trees, and autonomous coverage planning.
+
+This documentation covers Mowgli running on ROS2 Jazzy with Gazebo Harmonic.
 
 ## Quick Navigation
 
@@ -53,7 +55,9 @@ Build new features and extend the system:
    - mowgli_interfaces (messages and services)
    - mowgli_hardware (serial bridge)
    - mowgli_localization (odometry and GPS fusion)
-   - mowgli_nav2_plugins (FTC controller)
+   - mowgli_nav2_plugins (FTC and RotationShim controllers)
+   - mowgli_coverage_planner (autonomous mowing patterns)
+   - mowgli_monitoring (diagnostic and telemetry)
    - mowgli_behavior (behavior trees)
    - mowgli_bringup (configuration and launch)
 
@@ -61,6 +65,11 @@ Build new features and extend the system:
    - Contributing guidelines
    - Test coverage requirements
    - Building and testing
+
+3. **Development Setup** – Local environment configuration
+   - Installing ROS2 Jazzy
+   - Building workspace from source
+   - Running tests and linters
 
 ### For DevOps / Deployment
 
@@ -130,8 +139,8 @@ Run the system in production:
 | Simulation overview | [SIMULATION.md](SIMULATION.md) | Overview |
 | Launch simulation | [SIMULATION.md](SIMULATION.md) | Quick Start |
 | Common workflows | [SIMULATION.md](SIMULATION.md) | Common Workflows |
-| Gazebo controls | [SIMULATION.md](SIMULATION.md) | Gazebo Keyboard Controls |
-| RViz visualization | [SIMULATION.md](SIMULATION.md) | RViz2 Visualization |
+| Gazebo Harmonic controls | [SIMULATION.md](SIMULATION.md) | Gazebo Controls |
+| Foxglove visualization | [SIMULATION.md](SIMULATION.md) | Foxglove Monitoring |
 | Troubleshooting | [SIMULATION.md](SIMULATION.md) | Troubleshooting |
 
 ### Configuration & Tuning
@@ -141,6 +150,8 @@ Run the system in production:
 | Serial port setup | [CONFIGURATION.md](CONFIGURATION.md) | hardware_bridge.yaml |
 | EKF tuning | [CONFIGURATION.md](CONFIGURATION.md) | localization.yaml |
 | Motion control tuning | [CONFIGURATION.md](CONFIGURATION.md) | nav2_params.yaml → FTCController |
+| Coverage planning | [CONFIGURATION.md](CONFIGURATION.md) | coverage_planner.yaml |
+| Foxglove monitoring | [CONFIGURATION.md](CONFIGURATION.md) | foxglove_bridge.yaml |
 | Outdoor SLAM | [CONFIGURATION.md](CONFIGURATION.md) | slam_toolbox.yaml |
 | Behavior tree control | [ARCHITECTURE.md](ARCHITECTURE.md) | mowgli_behavior |
 | Parameter tuning workflow | [CONFIGURATION.md](CONFIGURATION.md) | Parameter Tuning Workflow |
@@ -168,15 +179,31 @@ mowgli_ros2/
 │   ├── ARCHITECTURE.md                # Technical architecture (detailed)
 │   ├── CONFIGURATION.md               # Parameter reference & tuning
 │   ├── FIRMWARE_MIGRATION.md          # STM32 integration guide
-│   └── SIMULATION.md                  # Gazebo simulation guide
+│   └── SIMULATION.md                  # Gazebo Harmonic simulation guide
 │
 ├── src/
 │   ├── mowgli_interfaces/             # Message definitions
 │   ├── mowgli_hardware/               # Serial bridge to STM32
-│   ├── mowgli_localization/           # Odometry & GPS fusion
-│   ├── mowgli_nav2_plugins/           # FTC controller plugin
+│   ├── mowgli_localization/           # Odometry & GPS fusion (dual EKF)
+│   ├── mowgli_nav2_plugins/           # FTC & RotationShim controllers
+│   ├── mowgli_coverage_planner/       # Autonomous mowing patterns
+│   ├── mowgli_monitoring/             # Diagnostics and telemetry
 │   ├── mowgli_behavior/               # Behavior tree nodes
-│   └── mowgli_bringup/                # Launch files & configuration
+│   ├── mowgli_bringup/                # Launch files & configuration
+│   │   └── config/
+│   │       ├── hardware_bridge.yaml
+│   │       ├── localization.yaml
+│   │       ├── nav2_params.yaml
+│   │       ├── coverage_planner.yaml
+│   │       ├── slam_toolbox.yaml
+│   │       ├── twist_mux.yaml
+│   │       ├── foxglove_bridge.yaml
+│   │       └── navigate_to_pose.xml   # Custom behavior tree
+│   │
+│   └── foxglove/                      # Foxglove dashboards
+│       ├── mowing.json                # Main mowing dashboard
+│       ├── debug.json                 # Diagnostic dashboard
+│       └── README.md                  # Dashboard setup guide
 │
 └── [build artifacts]
 ```
@@ -195,7 +222,7 @@ mowgli_ros2/
 #### Test in simulation
 1. Read [SIMULATION.md](SIMULATION.md) → Quick Start
 2. Run: `ros2 launch mowgli_bringup simulation.launch.py`
-3. Send goals from RViz or command line
+3. Open Foxglove and send goals, or use command line
 
 #### Tune localization
 1. Read [CONFIGURATION.md](CONFIGURATION.md) → localization.yaml
@@ -210,8 +237,13 @@ mowgli_ros2/
 
 #### Understand the system design
 1. Start with [ARCHITECTURE.md](ARCHITECTURE.md) → System Overview
-2. Review the package description that interests you
+2. Review the package description that interests you (9 packages total)
 3. Check the data flow diagram for end-to-end flow
+
+#### Configure autonomous mowing
+1. Read [CONFIGURATION.md](CONFIGURATION.md) → coverage_planner.yaml
+2. Set `tool_width`, `headland_passes`, `mowing_angle` for your environment
+3. Launch and monitor with Foxglove dashboard
 
 #### Integrate new STM32 firmware
 1. Read [FIRMWARE_MIGRATION.md](FIRMWARE_MIGRATION.md)
@@ -227,6 +259,124 @@ mowgli_ros2/
 
 ---
 
+## Development Workflow
+
+### Setting Up Your Development Environment
+
+**Prerequisites:**
+- Ubuntu 24.04 LTS (recommended for Jazzy)
+- ROS2 Jazzy installed
+- Gazebo Harmonic installed
+- 8+ GB RAM, 50 GB disk space
+
+**Quick Setup:**
+
+```bash
+# 1. Install ROS2 Jazzy (if not already installed)
+curl -sSL https://repo.ros2.org/ros.key | sudo apt-key add -
+sudo apt-add-repository "deb http://repo.ros2.org/ubuntu $(lsb_release -cs) main"
+sudo apt install ros-jazzy-desktop gazebo-harmonic
+
+# 2. Create workspace
+mkdir -p ~/mowgli_ws/src
+cd ~/mowgli_ws
+
+# 3. Clone Mowgli
+git clone https://github.com/ClemensElflein/mowgli-ros2.git src/mowgli_ros2
+
+# 4. Install dependencies
+rosdep install --from-paths src --ignore-src -r -y
+
+# 5. Build
+cd ~/mowgli_ws
+colcon build
+
+# 6. Source setup
+source install/setup.bash
+```
+
+### Building and Testing
+
+**Building the workspace:**
+```bash
+colcon build --parallel-workers 4 --symlink-install
+```
+
+**Running tests:**
+```bash
+colcon test
+colcon test-result --all
+```
+
+**Building a single package:**
+```bash
+colcon build --packages-select mowgli_nav2_plugins
+```
+
+### Running in Simulation
+
+```bash
+# Terminal 1: Launch simulation
+ros2 launch mowgli_bringup simulation.launch.py
+
+# Terminal 2: Open Foxglove
+# Navigate to http://localhost:8765 in your browser
+
+# Terminal 3: Send navigation goals (optional)
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{goal: {pose: {pose: {position: {x: 5.0, y: 5.0}, orientation: {w: 1.0}}}}}"
+```
+
+### Modifying Code
+
+**Making changes to a package:**
+1. Edit files in `src/mowgli_ros2/src/<package-name>/`
+2. If using `--symlink-install`, changes take effect immediately
+3. Otherwise rebuild: `colcon build --packages-select <package-name>`
+4. Restart the launch:
+   ```bash
+   ros2 launch mowgli_bringup simulation.launch.py
+   ```
+
+**Common editing tasks:**
+- **Navigation parameters:** Edit `src/mowgli_bringup/config/nav2_params.yaml`
+- **Coverage planner:** Edit `src/mowgli_bringup/config/coverage_planner.yaml`
+- **Controller tuning:** Modify FTC or RotationShim gains, then relaunch
+- **Hardware behavior:** Edit `src/mowgli_hardware/` source files
+
+### Debugging with Logs
+
+**Set log level for specific package:**
+```bash
+ros2 launch mowgli_bringup mowgli.launch.py \
+  --log-level mowgli_nav2_plugins:=DEBUG
+```
+
+**View all logs:**
+```bash
+# Printed to terminal (default)
+# Or stored in ~/.ros/log/
+
+cat ~/.ros/log/latest_run/mowgli_nav2_plugins_*.log
+```
+
+**Monitor runtime topics:**
+```bash
+# Odometry
+ros2 topic echo /odometry/filtered_map
+
+# Navigation feedback
+ros2 topic echo /navigate_to_pose/_action/feedback
+
+# Coverage planner status
+ros2 topic echo /coverage_status
+
+# Diagnostics
+ros2 topic echo /diagnostics
+```
+
+---
+
 ## Key Concepts
 
 ### Dual EKF Localization
@@ -238,15 +388,25 @@ Two Extended Kalman Filters work together:
 
 [See ARCHITECTURE.md → mowgli_localization for details]
 
-### FTC Local Controller
+### Dual-Mode Navigation
 
-Follow-The-Carrot algorithm with three independent PIDs:
+The system uses two specialized controllers selectable via behavior tree:
 
-- Linear velocity (cross-track error)
-- Angular velocity (heading error)
-- Acceleration (velocity error)
+- **FollowPath** (RotationShimController): Standard point-to-point navigation with heading control
+- **FollowCoveragePath** (FTCController): Lateral-control-focused for mowing patterns
 
-[See ARCHITECTURE.md → mowgli_nav2_plugins for details]
+[See ARCHITECTURE.md → mowgli_nav2_plugins and CONFIGURATION.md → controller_server for details]
+
+### Coverage Planning
+
+Autonomous generation of mowing patterns:
+
+- Headland passes around boundary
+- Interior stripe pattern with configurable spacing
+- Path smoothing and robot constraint satisfaction
+- Integration with dual goal checkers
+
+[See CONFIGURATION.md → coverage_planner.yaml for details]
 
 ### COBS Protocol
 
@@ -316,17 +476,18 @@ Include:
 
 ## Version History
 
-**Current Version:** 0.1.0 (Development)
+**Current Version:** 0.2.0 (Development)
 
 **Last Updated:** 2026-03-27
 
-| Component | Version | ROS2 Distro |
-|-----------|---------|-------------|
-| mowgli_ros2 | 0.1.0 | Humble |
-| Nav2 | Latest | Humble |
-| SLAM Toolbox | Latest | Humble |
-| BehaviorTree.CPP | v4 | – |
-| Gazebo Ignition | Fortress+ | – |
+| Component | Version | Notes |
+|-----------|---------|-------|
+| ROS2 Distro | Jazzy | Released May 2024 |
+| Gazebo | Harmonic | Latest simulation engine |
+| Nav2 | Latest (Jazzy) | Auto-loaded plugins, no manual registration |
+| SLAM Toolbox | Latest (Jazzy) | Outdoor-tuned defaults |
+| BehaviorTree.CPP | v4 | ReactiveSequence with emergency guard |
+| Total Packages | 9 | Core system complete |
 
 ---
 
@@ -334,4 +495,6 @@ Include:
 
 **Reference [ARCHITECTURE.md](ARCHITECTURE.md) and [CONFIGURATION.md](CONFIGURATION.md) for deep technical details.**
 
-Happy mowing! 🚜
+**Monitor with [Foxglove Studio](../src/foxglove/README.md) for remote visualization and diagnostics.**
+
+Happy mowing!
