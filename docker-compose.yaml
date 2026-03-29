@@ -74,6 +74,7 @@ services:
       - /opt/ros/noetic/bin/roscore
     environment:
       ROS_IP: ${ROS_IP}
+      ROS_MASTER_URI: http://${ROS_IP}:11311
       ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config
       ROSOUT_DISABLE_FILE_LOGGING: true
     tmpfs: /root/.ros/log/
