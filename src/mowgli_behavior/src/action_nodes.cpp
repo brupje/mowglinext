@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "action_msgs/msg/goal_status.hpp"
 #include "geometry_msgs/msg/point32.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -396,59 +397,55 @@ BT::NodeStatus PlanCoveragePath::onStart()
     return BT::NodeStatus::FAILURE;
   }
 
-  // Build goal.
+  // Build goal: fetch area boundary + obstacles from map_server (single source of truth).
   PlanCoverageAction::Goal goal_msg;
   goal_msg.mow_angle_deg = -1.0;  // auto-optimize
   goal_msg.skip_outline  = false;
 
-  // Try reading the mowing boundary from the blackboard / port.
-  std::string boundary_str;
-  if (auto res = getInput<std::string>("boundary")) {
-    boundary_str = res.value();
-  }
-  if (boundary_str.empty()) {
-    auto entry = config().blackboard->getEntry("mowing_boundary");
-    if (entry) {
-      boundary_str = entry->value.cast<std::string>();
-    }
-  }
-
-  if (boundary_str.empty()) {
-    // Default simulation area inset 1.0m from garden walls (20x15m garden).
-    // Inset = robot_radius (0.22m) + inflation_radius (0.3m) + 0.48m margin
-    // so the coverage path never drives into inflated costmap zones near walls.
-    geometry_msgs::msg::Point32 p;
-    p.z = 0.0f;
-    p.x = -7.0f;  p.y = -6.5f; goal_msg.outer_boundary.points.push_back(p);
-    p.x = 11.0f;  p.y = -6.5f; goal_msg.outer_boundary.points.push_back(p);
-    p.x = 11.0f;  p.y =  6.5f; goal_msg.outer_boundary.points.push_back(p);
-    p.x = -7.0f;  p.y =  6.5f; goal_msg.outer_boundary.points.push_back(p);
-    RCLCPP_INFO(ctx->node->get_logger(),
-      "PlanCoveragePath: using default 18x13m simulation boundary (1.0m inset from walls)");
-  }
-
-  // Fetch obstacles from the map server so F2C can plan around them.
   {
-    auto get_area_client = ctx->node->create_client<mowgli_interfaces::srv::GetMowingArea>(
-      "/map_server/get_mowing_area");
-    if (get_area_client->wait_for_service(std::chrono::milliseconds(500))) {
-      auto request = std::make_shared<mowgli_interfaces::srv::GetMowingArea::Request>();
-      request->index = area_index;
-      auto future = get_area_client->async_send_request(request);
-      if (future.wait_for(std::chrono::seconds(2)) == std::future_status::ready) {
-        auto response = future.get();
-        if (response->success) {
-          goal_msg.obstacles = response->area.obstacles;
-          RCLCPP_INFO(ctx->node->get_logger(),
-            "PlanCoveragePath: fetched %zu obstacles from map server",
-            goal_msg.obstacles.size());
-        }
-      }
-    } else {
-      RCLCPP_WARN(ctx->node->get_logger(),
-        "PlanCoveragePath: map_server get_mowing_area service unavailable, "
-        "planning without obstacles");
+    auto request = std::make_shared<mowgli_interfaces::srv::GetMowingArea::Request>();
+    request->index = area_index;
+
+    // Use a temporary node to avoid "already added to an executor" error
+    // (the main behavior_tree_node is already spinning in rclcpp::spin).
+    auto tmp_node = rclcpp::Node::make_shared("_plan_coverage_srv_helper");
+    auto tmp_client = tmp_node->create_client<mowgli_interfaces::srv::GetMowingArea>(
+      "/map_server_node/get_mowing_area");
+    if (!tmp_client->wait_for_service(std::chrono::milliseconds(2000))) {
+      RCLCPP_ERROR(ctx->node->get_logger(),
+        "PlanCoveragePath: map_server get_mowing_area service unavailable — cannot plan");
+      return BT::NodeStatus::FAILURE;
     }
+    auto future = tmp_client->async_send_request(request);
+    if (rclcpp::spin_until_future_complete(tmp_node, future, std::chrono::seconds(5)) !=
+        rclcpp::FutureReturnCode::SUCCESS) {
+      RCLCPP_ERROR(ctx->node->get_logger(),
+        "PlanCoveragePath: get_mowing_area timed out");
+      return BT::NodeStatus::FAILURE;
+    }
+
+    auto response = future.get();
+    if (!response->success) {
+      RCLCPP_ERROR(ctx->node->get_logger(),
+        "PlanCoveragePath: map_server returned no area for index %u", area_index);
+      return BT::NodeStatus::FAILURE;
+    }
+
+    if (response->area.is_navigation_area) {
+      RCLCPP_WARN(ctx->node->get_logger(),
+        "PlanCoveragePath: area %u ('%s') is a navigation area — skipping",
+        area_index, response->area.name.c_str());
+      return BT::NodeStatus::FAILURE;
+    }
+
+    goal_msg.outer_boundary = response->area.area;
+    goal_msg.obstacles = response->area.obstacles;
+
+    RCLCPP_INFO(ctx->node->get_logger(),
+      "PlanCoveragePath: area '%s' — %zu boundary vertices, %zu obstacles",
+      response->area.name.c_str(),
+      goal_msg.outer_boundary.points.size(),
+      goal_msg.obstacles.size());
   }
 
   // Send the goal asynchronously.
@@ -770,6 +767,228 @@ void SaveSlamMap::onHalted()
   // The future cannot be cancelled once sent; release the handle so the
   // response is discarded if it arrives after the node is halted.
   response_future_ = {};
+}
+
+// ---------------------------------------------------------------------------
+// ReplanCoverage
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus ReplanCoverage::onStart()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  result_received_ = false;
+  latest_result_.reset();
+  goal_handle_.reset();
+
+  if (!action_client_) {
+    action_client_ = rclcpp_action::create_client<PlanCoverageAction>(
+      ctx->node, "/coverage_planner_node/plan_coverage");
+  }
+
+  if (!action_client_->wait_for_action_server(std::chrono::milliseconds(500))) {
+    RCLCPP_WARN(ctx->node->get_logger(),
+      "ReplanCoverage: action server not available");
+    return BT::NodeStatus::FAILURE;
+  }
+
+  // Build goal: fetch current area + obstacles from map server (single source of truth).
+  PlanCoverageAction::Goal goal_msg;
+  goal_msg.mow_angle_deg = -1.0;
+  goal_msg.skip_outline = true;  // Faster replanning — skip outline visualization
+
+  {
+    auto request = std::make_shared<mowgli_interfaces::srv::GetMowingArea::Request>();
+    request->index = 0;
+
+    // Use a temporary node to avoid "already added to an executor" error.
+    auto tmp_node = rclcpp::Node::make_shared("_replan_coverage_srv_helper");
+    auto tmp_client = tmp_node->create_client<mowgli_interfaces::srv::GetMowingArea>(
+      "/map_server_node/get_mowing_area");
+    if (!tmp_client->wait_for_service(std::chrono::milliseconds(2000))) {
+      RCLCPP_ERROR(ctx->node->get_logger(),
+        "ReplanCoverage: map_server get_mowing_area service unavailable");
+      return BT::NodeStatus::FAILURE;
+    }
+    auto future = tmp_client->async_send_request(request);
+    if (rclcpp::spin_until_future_complete(tmp_node, future, std::chrono::seconds(5)) !=
+        rclcpp::FutureReturnCode::SUCCESS) {
+      RCLCPP_ERROR(ctx->node->get_logger(), "ReplanCoverage: get_mowing_area timed out");
+      return BT::NodeStatus::FAILURE;
+    }
+
+    auto response = future.get();
+    if (!response->success) {
+      RCLCPP_ERROR(ctx->node->get_logger(),
+        "ReplanCoverage: map_server returned no area");
+      return BT::NodeStatus::FAILURE;
+    }
+
+    goal_msg.outer_boundary = response->area.area;
+    goal_msg.obstacles = response->area.obstacles;
+    RCLCPP_INFO(ctx->node->get_logger(),
+      "ReplanCoverage: area '%s' — %zu obstacles",
+      response->area.name.c_str(), goal_msg.obstacles.size());
+  }
+
+  auto send_goal_options = rclcpp_action::Client<PlanCoverageAction>::SendGoalOptions{};
+  send_goal_options.result_callback =
+    [this](const GoalHandle::WrappedResult & wr) {
+      latest_result_ = wr.result;
+      result_received_ = true;
+    };
+
+  goal_handle_future_ = action_client_->async_send_goal(goal_msg, send_goal_options);
+  goal_handle_.reset();
+
+  RCLCPP_INFO(ctx->node->get_logger(), "ReplanCoverage: goal sent");
+  return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus ReplanCoverage::onRunning()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  if (!goal_handle_) {
+    if (goal_handle_future_.wait_for(std::chrono::milliseconds(0))
+        != std::future_status::ready)
+    {
+      return BT::NodeStatus::RUNNING;
+    }
+    goal_handle_ = goal_handle_future_.get();
+    if (!goal_handle_) {
+      RCLCPP_ERROR(ctx->node->get_logger(), "ReplanCoverage: goal rejected");
+      return BT::NodeStatus::FAILURE;
+    }
+  }
+
+  if (!result_received_) {
+    const auto status = goal_handle_->get_status();
+    if (status == action_msgs::msg::GoalStatus::STATUS_ABORTED ||
+        status == action_msgs::msg::GoalStatus::STATUS_CANCELED)
+    {
+      RCLCPP_WARN(ctx->node->get_logger(), "ReplanCoverage: planner aborted/canceled");
+      return BT::NodeStatus::FAILURE;
+    }
+    return BT::NodeStatus::RUNNING;
+  }
+
+  if (!latest_result_ || !latest_result_->success) {
+    RCLCPP_WARN(ctx->node->get_logger(), "ReplanCoverage: planner returned failure");
+    return BT::NodeStatus::FAILURE;
+  }
+
+  // Clear the replan flag.
+  ctx->replan_needed = false;
+
+  // Write first waypoint to output port.
+  if (!latest_result_->path.poses.empty()) {
+    const auto & first = latest_result_->path.poses.front().pose;
+    const double siny = 2.0 * (first.orientation.w * first.orientation.z +
+                                first.orientation.x * first.orientation.y);
+    const double cosy = 1.0 - 2.0 * (first.orientation.y * first.orientation.y +
+                                       first.orientation.z * first.orientation.z);
+    const double yaw = std::atan2(siny, cosy);
+
+    std::ostringstream oss;
+    oss << first.position.x << ";" << first.position.y << ";" << yaw;
+    setOutput("first_waypoint", oss.str());
+  }
+
+  RCLCPP_INFO(ctx->node->get_logger(),
+    "ReplanCoverage: new path with %zu poses ready",
+    latest_result_->path.poses.size());
+
+  return BT::NodeStatus::SUCCESS;
+}
+
+void ReplanCoverage::onHalted()
+{
+  if (goal_handle_) {
+    auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+    action_client_->async_cancel_goal(goal_handle_);
+    RCLCPP_INFO(ctx->node->get_logger(), "ReplanCoverage: halted, goal cancelled");
+  }
+  goal_handle_.reset();
+  result_received_ = false;
+  latest_result_.reset();
+}
+
+// ---------------------------------------------------------------------------
+// SaveObstacles
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus SaveObstacles::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  if (!client_) {
+    client_ = ctx->node->create_client<std_srvs::srv::Trigger>(
+      "/obstacle_tracker/save_obstacles");
+  }
+
+  if (!client_->service_is_ready()) {
+    RCLCPP_WARN(ctx->node->get_logger(),
+      "SaveObstacles: service unavailable, skipping (no obstacle tracker running)");
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+  client_->async_send_request(request);
+
+  RCLCPP_INFO(ctx->node->get_logger(), "SaveObstacles: save request sent");
+  return BT::NodeStatus::SUCCESS;
+}
+
+// ---------------------------------------------------------------------------
+// SetNavMode
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus SetNavMode::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  auto mode_res = getInput<std::string>("mode");
+  if (!mode_res) {
+    return BT::NodeStatus::FAILURE;
+  }
+  const std::string mode = mode_res.value();
+
+  if (mode == ctx->current_nav_mode) {
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  // Reconfigure controller speed via dynamic parameter API.
+  auto param_client = std::make_shared<rclcpp::AsyncParametersClient>(
+    ctx->node, "/controller_server");
+
+  if (!param_client->wait_for_service(std::chrono::milliseconds(200))) {
+    RCLCPP_WARN(ctx->node->get_logger(),
+      "SetNavMode: controller_server param service unavailable");
+    // Still update the mode in context so we don't retry every tick.
+    ctx->current_nav_mode = mode;
+    return BT::NodeStatus::SUCCESS;
+  }
+
+  std::vector<rclcpp::Parameter> params;
+  if (mode == "precise") {
+    params = {
+      rclcpp::Parameter("FollowCoveragePath.desired_linear_vel", 0.5),
+      rclcpp::Parameter("FollowPath.desired_linear_vel", 0.5),
+    };
+  } else {
+    // degraded: half speed
+    params = {
+      rclcpp::Parameter("FollowCoveragePath.desired_linear_vel", 0.25),
+      rclcpp::Parameter("FollowPath.desired_linear_vel", 0.25),
+    };
+  }
+
+  param_client->set_parameters(params);
+  ctx->current_nav_mode = mode;
+
+  RCLCPP_INFO(ctx->node->get_logger(), "SetNavMode: mode set to '%s'", mode.c_str());
+  return BT::NodeStatus::SUCCESS;
 }
 
 // ---------------------------------------------------------------------------

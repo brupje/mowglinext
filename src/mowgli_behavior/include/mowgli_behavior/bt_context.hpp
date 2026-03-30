@@ -49,6 +49,30 @@ struct BTContext {
   float gps_quality{0.0f};
 
   // -----------------------------------------------------------------------
+  // GPS quality classification (derived from gps_quality / fix_type)
+  // -----------------------------------------------------------------------
+
+  /// GPS fix type: 0=no fix, 1=autonomous, 2=DGPS, 4=RTK fixed, 5=RTK float
+  uint8_t gps_fix_type{0};
+
+  /// true when RTK fixed (fix_type >= 4 and gps_quality > 80%)
+  bool gps_is_fixed{false};
+
+  // -----------------------------------------------------------------------
+  // Localization quality flags (set by boundary/replan monitors)
+  // -----------------------------------------------------------------------
+
+  /// Set to true when ObstacleTracker publishes updated obstacles that
+  /// differ from the last coverage plan.
+  bool replan_needed{false};
+
+  /// Set to true when the robot is outside all allowed polygons.
+  bool boundary_violation{false};
+
+  /// Current navigation mode: "precise" or "degraded"
+  std::string current_nav_mode{"precise"};
+
+  // -----------------------------------------------------------------------
   // Docking point (set from parameter or service call)
   // -----------------------------------------------------------------------
 

@@ -31,6 +31,7 @@
 #include <grid_map_ros/GridMapRosConverter.hpp>
 
 #include <geometry_msgs/msg/point.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 namespace mowgli_map
 {
@@ -144,13 +145,126 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions & options)
       on_get_mowing_area(req, res);
     });
 
+  // ── Replanning parameters ────────────────────────────────────────────────
+  replan_cooldown_sec_ = declare_parameter<double>("replan_cooldown_sec", 30.0);
+  last_replan_time_ = now();
+
+  // ── Replan / boundary publishers ────────────────────────────────────────
+  replan_needed_pub_ = create_publisher<std_msgs::msg::Bool>(
+    "~/replan_needed", rclcpp::QoS(1).transient_local());
+  boundary_violation_pub_ = create_publisher<std_msgs::msg::Bool>(
+    "~/boundary_violation", rclcpp::QoS(1));
+
+  // ── Obstacle subscription ─────────────────────────────────────────────
+  obstacle_sub_ = create_subscription<mowgli_interfaces::msg::ObstacleArray>(
+    "/obstacle_tracker/obstacles", rclcpp::QoS(1),
+    [this](mowgli_interfaces::msg::ObstacleArray::ConstSharedPtr msg) {
+      on_obstacles(std::move(msg));
+    });
+
+  // ── Load pre-defined areas from parameters ────────────────────────────
+  load_areas_from_params();
+
   // ── Publish timer ────────────────────────────────────────────────────────
   const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::duration<double>(1.0 / publish_rate_));
 
   publish_timer_ = create_wall_timer(period_ns, [this]() { on_publish_timer(); });
 
-  RCLCPP_INFO(get_logger(), "MapServerNode ready.");
+  RCLCPP_INFO(get_logger(), "MapServerNode ready (%zu areas loaded).", areas_.size());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Area loading from parameters
+// ─────────────────────────────────────────────────────────────────────────────
+
+geometry_msgs::msg::Polygon MapServerNode::parse_polygon_string(const std::string & s)
+{
+  geometry_msgs::msg::Polygon poly;
+  if (s.empty()) {
+    return poly;
+  }
+
+  std::istringstream pts_stream(s);
+  std::string point_str;
+  while (std::getline(pts_stream, point_str, ';')) {
+    std::istringstream coord_stream(point_str);
+    std::string x_str, y_str;
+    if (std::getline(coord_stream, x_str, ',') &&
+        std::getline(coord_stream, y_str, ','))
+    {
+      geometry_msgs::msg::Point32 p;
+      p.x = std::stof(x_str);
+      p.y = std::stof(y_str);
+      p.z = 0.0f;
+      poly.points.push_back(p);
+    }
+  }
+  return poly;
+}
+
+void MapServerNode::load_areas_from_params()
+{
+  // Declare area parameter arrays with empty defaults.
+  const auto area_names = declare_parameter<std::vector<std::string>>(
+    "area_names", std::vector<std::string>{});
+  const auto area_polygons = declare_parameter<std::vector<std::string>>(
+    "area_polygons", std::vector<std::string>{});
+  const auto area_is_navigation = declare_parameter<std::vector<bool>>(
+    "area_is_navigation", std::vector<bool>{});
+  const auto area_obstacles = declare_parameter<std::vector<std::string>>(
+    "area_obstacles", std::vector<std::string>{});
+
+  if (area_names.empty()) {
+    RCLCPP_WARN(get_logger(),
+      "No areas configured (area_names is empty). "
+      "Keepout mask will not be published until areas are added via service.");
+    return;
+  }
+
+  if (area_names.size() != area_polygons.size()) {
+    RCLCPP_ERROR(get_logger(),
+      "area_names (%zu) and area_polygons (%zu) must have the same length!",
+      area_names.size(), area_polygons.size());
+    return;
+  }
+
+  for (std::size_t i = 0; i < area_names.size(); ++i) {
+    AreaEntry entry;
+    entry.name = area_names[i];
+    entry.polygon = parse_polygon_string(area_polygons[i]);
+    entry.is_navigation_area = (i < area_is_navigation.size()) && area_is_navigation[i];
+
+    if (entry.polygon.points.size() < 3) {
+      RCLCPP_WARN(get_logger(),
+        "Skipping area '%s': polygon has %zu vertices (need >= 3)",
+        entry.name.c_str(), entry.polygon.points.size());
+      continue;
+    }
+
+    // Parse obstacle polygons (semicolon-separated polygon strings, pipe-separated).
+    // Format: "x1,y1;x2,y2;x3,y3|x4,y4;x5,y5;x6,y6" for multiple obstacles.
+    if (i < area_obstacles.size() && !area_obstacles[i].empty()) {
+      std::istringstream obs_stream(area_obstacles[i]);
+      std::string obs_str;
+      while (std::getline(obs_stream, obs_str, '|')) {
+        auto obs_poly = parse_polygon_string(obs_str);
+        if (obs_poly.points.size() >= 3) {
+          entry.obstacles.push_back(obs_poly);
+          obstacle_polygons_.push_back(obs_poly);
+        }
+      }
+    }
+
+    RCLCPP_INFO(get_logger(),
+      "Loaded area '%s': %zu vertices, %s, %zu obstacles",
+      entry.name.c_str(),
+      entry.polygon.points.size(),
+      entry.is_navigation_area ? "navigation" : "mowing",
+      entry.obstacles.size());
+
+    areas_.push_back(std::move(entry));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -199,9 +313,6 @@ void MapServerNode::on_occupancy_grid(nav_msgs::msg::OccupancyGrid::ConstSharedP
     return;
   }
 
-  // Iterate over every cell in the incoming map and copy into our occupancy layer.
-  // Values in nav_msgs/OccupancyGrid: 0=free, 100=occupied, -1=unknown.
-  // We map: 0→0.0 (free), >50→1.0 (occupied), unknown→NaN (keep existing).
   const auto & info = msg->info;
   const float res   = static_cast<float>(info.resolution);
   const float ox    = static_cast<float>(info.origin.position.x) + res * 0.5F;
@@ -211,7 +322,7 @@ void MapServerNode::on_occupancy_grid(nav_msgs::msg::OccupancyGrid::ConstSharedP
     for (uint32_t col = 0; col < info.width; ++col) {
       const int8_t cell_val = msg->data[static_cast<std::size_t>(row * info.width + col)];
       if (cell_val < 0) {
-        continue;  // unknown — leave existing value intact
+        continue;
       }
 
       const grid_map::Position pos(
@@ -220,7 +331,7 @@ void MapServerNode::on_occupancy_grid(nav_msgs::msg::OccupancyGrid::ConstSharedP
 
       grid_map::Index idx;
       if (!map_.getIndex(pos, idx)) {
-        continue;  // outside our map bounds
+        continue;
       }
 
       map_.at(std::string(layers::OCCUPANCY), idx) =
@@ -236,17 +347,26 @@ void MapServerNode::on_mower_status(mowgli_interfaces::msg::Status::ConstSharedP
 
 void MapServerNode::on_odom(nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
+  const double x = msg->pose.pose.position.x;
+  const double y = msg->pose.pose.position.y;
+
+  check_boundary_violation(x, y);
+
   if (!mow_blade_enabled_) {
     return;
   }
-
-  const double x = msg->pose.pose.position.x;
-  const double y = msg->pose.pose.position.y;
 
   {
     std::lock_guard<std::mutex> lock(map_mutex_);
     mark_cells_mowed(x, y);
   }
+}
+
+void MapServerNode::on_obstacles(
+  mowgli_interfaces::msg::ObstacleArray::ConstSharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(map_mutex_);
+  diff_and_update_obstacles(msg->obstacles);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,14 +383,11 @@ void MapServerNode::on_publish_timer()
     std::lock_guard<std::mutex> lock(map_mutex_);
     apply_decay(elapsed);
 
-    // Publish full grid map
     auto grid_map_msg = grid_map::GridMapRosConverter::toMessage(map_);
     grid_map_pub_->publish(std::move(grid_map_msg));
 
-    // Publish mow_progress as OccupancyGrid for visualisation
     mow_progress_pub_->publish(mow_progress_to_occupancy_grid());
 
-    // Publish costmap filter masks (transient_local — harmless to re-publish).
     publish_keepout_mask();
     publish_speed_mask();
   }
@@ -294,15 +411,9 @@ void MapServerNode::on_save_map(
   try {
     std::lock_guard<std::mutex> lock(map_mutex_);
 
-    // Serialise using grid_map bag file support (YAML sidecar + binary data).
-    // grid_map_ros provides rosbag-based I/O; we use a simpler approach:
-    // store the OccupancyGrid for occupancy and CSV for other layers so the
-    // file remains human-readable and does not require rosbag2 at runtime.
-
     const std::string yaml_path = map_file_path_ + ".yaml";
     const std::string data_path = map_file_path_ + ".dat";
 
-    // Write metadata YAML
     std::ofstream yaml(yaml_path);
     if (!yaml.is_open()) {
       throw std::runtime_error("Cannot open " + yaml_path + " for writing");
@@ -317,7 +428,6 @@ void MapServerNode::on_save_map(
          << "pos_y: "        << map_.getPosition().y() << "\n";
     yaml.close();
 
-    // Write binary layer data: row-major, all four layers interleaved per cell.
     std::ofstream dat(data_path, std::ios::binary);
     if (!dat.is_open()) {
       throw std::runtime_error("Cannot open " + data_path + " for writing");
@@ -364,7 +474,6 @@ void MapServerNode::on_load_map(
     const std::string yaml_path = map_file_path_ + ".yaml";
     const std::string data_path = map_file_path_ + ".dat";
 
-    // Parse YAML sidecar
     std::ifstream yaml(yaml_path);
     if (!yaml.is_open()) {
       throw std::runtime_error("Cannot open " + yaml_path);
@@ -395,7 +504,6 @@ void MapServerNode::on_load_map(
       throw std::runtime_error("Invalid map dimensions in " + yaml_path);
     }
 
-    // Rebuild map geometry
     std::lock_guard<std::mutex> lock(map_mutex_);
 
     resolution_  = res_loaded;
@@ -415,7 +523,6 @@ void MapServerNode::on_load_map(
       resolution_,
       grid_map::Position(pos_x, pos_y));
 
-    // Read binary layer data
     std::ifstream dat(data_path, std::ios::binary);
     if (!dat.is_open()) {
       throw std::runtime_error("Cannot open " + data_path);
@@ -494,18 +601,18 @@ void MapServerNode::on_add_no_go_zone(
     }
   }
 
-  // Store the polygon as an allowed area (mowing or navigation zone).
-  // Navigation areas are corridors connecting mowing zones; both are
-  // treated as free space in the keepout mask.
-  allowed_polygons_.push_back(polygon_msg);
+  // Store as an area entry.
+  AreaEntry entry;
+  entry.name = req->area.name;
+  entry.polygon = polygon_msg;
+  entry.is_navigation_area = req->is_navigation_area;
 
   // Store obstacle polygons from the MapArea message.
-  // These are interior exclusion zones (trees, flower beds, etc.).
   for (const auto & obstacle : req->area.obstacles) {
     if (obstacle.points.size() >= 3) {
+      entry.obstacles.push_back(obstacle);
       obstacle_polygons_.push_back(obstacle);
 
-      // Also mark obstacle cells in the classification layer
       grid_map::Polygon obs_gm;
       for (const auto & pt : obstacle.points) {
         obs_gm.addVertex(
@@ -518,9 +625,13 @@ void MapServerNode::on_add_no_go_zone(
     }
   }
 
+  areas_.push_back(std::move(entry));
+
   RCLCPP_INFO(
-    get_logger(), "Added allowed area '%s' with %zu vertices and %zu obstacles.",
-    req->area.name.c_str(), polygon_msg.points.size(), req->area.obstacles.size());
+    get_logger(), "Added area '%s' (%s) with %zu vertices and %zu obstacles.",
+    req->area.name.c_str(),
+    req->is_navigation_area ? "navigation" : "mowing",
+    polygon_msg.points.size(), req->area.obstacles.size());
 
   res->success = true;
 }
@@ -530,16 +641,28 @@ void MapServerNode::on_get_mowing_area(
   mowgli_interfaces::srv::GetMowingArea::Response::SharedPtr res)
 {
   const auto idx = static_cast<std::size_t>(req->index);
-  if (idx < allowed_polygons_.size()) {
-    res->area.area      = allowed_polygons_[idx];
-    res->area.name      = "area_" + std::to_string(idx);
-    res->area.obstacles = obstacle_polygons_;
-    res->success        = true;
-  } else if (!allowed_polygons_.empty()) {
-    res->area.area      = allowed_polygons_[0];
-    res->area.name      = "mowing_area";
-    res->area.obstacles = obstacle_polygons_;
-    res->success        = true;
+  if (idx < areas_.size()) {
+    const auto & entry = areas_[idx];
+    res->area.name              = entry.name;
+    res->area.area              = entry.polygon;
+    res->area.obstacles         = entry.obstacles;
+    res->area.is_navigation_area = entry.is_navigation_area;
+    // Also include dynamic obstacles from the tracker.
+    for (const auto & obs : obstacle_polygons_) {
+      res->area.obstacles.push_back(obs);
+    }
+    res->success = true;
+  } else if (!areas_.empty()) {
+    // Fall back to first area if index is out of range.
+    const auto & entry = areas_[0];
+    res->area.name              = entry.name;
+    res->area.area              = entry.polygon;
+    res->area.obstacles         = entry.obstacles;
+    res->area.is_navigation_area = entry.is_navigation_area;
+    for (const auto & obs : obstacle_polygons_) {
+      res->area.obstacles.push_back(obs);
+    }
+    res->success = true;
   } else {
     res->success = false;
   }
@@ -551,7 +674,6 @@ void MapServerNode::on_get_mowing_area(
 
 void MapServerNode::clear_map_layers()
 {
-  // Caller must hold map_mutex_.
   map_[std::string(layers::OCCUPANCY)].setConstant(defaults::OCCUPANCY);
   map_[std::string(layers::CLASSIFICATION)].setConstant(defaults::CLASSIFICATION);
   map_[std::string(layers::MOW_PROGRESS)].setConstant(defaults::MOW_PROGRESS);
@@ -560,7 +682,6 @@ void MapServerNode::clear_map_layers()
 
 nav_msgs::msg::OccupancyGrid MapServerNode::mow_progress_to_occupancy_grid() const
 {
-  // Caller must hold map_mutex_.
   nav_msgs::msg::OccupancyGrid grid;
   grid.header.stamp    = now();
   grid.header.frame_id = map_frame_;
@@ -568,7 +689,6 @@ nav_msgs::msg::OccupancyGrid MapServerNode::mow_progress_to_occupancy_grid() con
   grid.info.width      = static_cast<uint32_t>(map_.getSize()(1));
   grid.info.height     = static_cast<uint32_t>(map_.getSize()(0));
 
-  // Set origin at bottom-left corner
   grid.info.origin.position.x = map_.getPosition().x() - map_size_x_ * 0.5;
   grid.info.origin.position.y = map_.getPosition().y() - map_size_y_ * 0.5;
   grid.info.origin.position.z = 0.0;
@@ -580,16 +700,13 @@ nav_msgs::msg::OccupancyGrid MapServerNode::mow_progress_to_occupancy_grid() con
 
   grid.data.resize(static_cast<std::size_t>(rows * cols), 0);
 
-  // grid_map stores data column-major; OccupancyGrid is row-major.
-  // grid_map row 0 is the top of the map; OccupancyGrid row 0 is the bottom.
   for (int r = 0; r < rows; ++r) {
     for (int c = 0; c < cols; ++c) {
       const float val = prog(r, c);
-      // Flip row axis: OccupancyGrid bottom row = grid_map top row
       const int og_row = rows - 1 - r;
-      const auto idx = static_cast<std::size_t>(og_row * cols + c);
+      const auto flat_idx = static_cast<std::size_t>(og_row * cols + c);
       const float clamped = std::clamp(val, 0.0F, 1.0F);
-      grid.data[idx] = static_cast<int8_t>(std::lround(clamped * 100.0F));
+      grid.data[flat_idx] = static_cast<int8_t>(std::lround(clamped * 100.0F));
     }
   }
 
@@ -598,7 +715,6 @@ nav_msgs::msg::OccupancyGrid MapServerNode::mow_progress_to_occupancy_grid() con
 
 void MapServerNode::apply_decay(double elapsed_seconds)
 {
-  // Caller must hold map_mutex_.
   if (elapsed_seconds <= 0.0 || decay_rate_per_hour_ <= 0.0) {
     return;
   }
@@ -612,7 +728,6 @@ void MapServerNode::apply_decay(double elapsed_seconds)
 
 void MapServerNode::mark_cells_mowed(double x, double y)
 {
-  // Caller must hold map_mutex_.
   const grid_map::Position center(x, y);
   const double radius = mower_width_ * 0.5;
 
@@ -654,8 +769,7 @@ bool MapServerNode::point_in_polygon(
 
 void MapServerNode::publish_keepout_mask()
 {
-  // Caller must hold map_mutex_.
-  if (allowed_polygons_.empty()) {
+  if (areas_.empty()) {
     return;
   }
 
@@ -675,9 +789,7 @@ void MapServerNode::publish_keepout_mask()
   mask.info.origin.orientation.w = 1.0;
   mask.data.resize(static_cast<std::size_t>(rows * cols), 100);  // default: keepout
 
-  // Check each cell against ALL allowed area polygons (mowing zones +
-  // navigation corridors).  A cell inside ANY allowed polygon is free.
-  // grid_map row 0 is top; OccupancyGrid row 0 is bottom — flip the row axis.
+  // A cell inside ANY area (mowing or navigation) is free.
   for (int r = 0; r < rows; ++r) {
     for (int c = 0; c < cols; ++c) {
       grid_map::Position pos;
@@ -695,21 +807,20 @@ void MapServerNode::publish_keepout_mask()
       const auto flat_idx = static_cast<std::size_t>(og_row * cols + c);
 
       bool inside_any = false;
-      for (const auto & poly : allowed_polygons_) {
-        if (point_in_polygon(pt, poly)) {
+      for (const auto & area : areas_) {
+        if (point_in_polygon(pt, area.polygon)) {
           inside_any = true;
           break;
         }
       }
 
       if (inside_any) {
-        mask.data[flat_idx] = 0;  // inside an allowed area → free
+        mask.data[flat_idx] = 0;
       }
-      // else: already 100 (outside all allowed areas → lethal keepout)
     }
   }
 
-  // Overlay obstacle polygons: cells inside any obstacle → 100 (lethal).
+  // Overlay obstacle polygons: cells inside any obstacle -> 100 (lethal).
   for (int r = 0; r < rows; ++r) {
     for (int c = 0; c < cols; ++c) {
       grid_map::Position pos;
@@ -747,21 +858,26 @@ void MapServerNode::publish_keepout_mask()
 
   keepout_mask_pub_->publish(mask);
 
-  // Publish the filter info so Nav2 knows how to interpret the mask.
-  nav2_msgs::msg::CostmapFilterInfo info;
-  info.header.stamp    = mask.header.stamp;
-  info.header.frame_id = map_frame_;
-  info.type            = 0;                // KEEPOUT = 0
-  info.filter_mask_topic = "/keepout_mask";
-  info.base            = 0.0F;
-  info.multiplier      = 1.0F;
-  keepout_filter_info_pub_->publish(info);
+  // Publish filter info only once (transient_local latches it for late
+  // subscribers).  Republishing every cycle causes Nav2 KeepoutFilter to
+  // re-subscribe to the mask topic each time, blocking the costmap update
+  // thread and starving the planner of CPU.
+  if (!keepout_filter_info_sent_) {
+    nav2_msgs::msg::CostmapFilterInfo info;
+    info.header.stamp    = mask.header.stamp;
+    info.header.frame_id = map_frame_;
+    info.type            = 0;                // KEEPOUT = 0
+    info.filter_mask_topic = "/keepout_mask";
+    info.base            = 0.0F;
+    info.multiplier      = 1.0F;
+    keepout_filter_info_pub_->publish(info);
+    keepout_filter_info_sent_ = true;
+  }
 }
 
 void MapServerNode::publish_speed_mask()
 {
-  // Caller must hold map_mutex_.
-  if (allowed_polygons_.empty()) {
+  if (areas_.empty()) {
     return;
   }
 
@@ -769,7 +885,6 @@ void MapServerNode::publish_speed_mask()
   const int cols = map_.getSize()(1);
   const float res = static_cast<float>(resolution_);
 
-  // Headland band half-width: one full tool width from the boundary.
   const double headland_radius = mower_width_;
 
   nav_msgs::msg::OccupancyGrid mask;
@@ -784,9 +899,8 @@ void MapServerNode::publish_speed_mask()
   mask.info.origin.orientation.w = 1.0;
   mask.data.resize(static_cast<std::size_t>(rows * cols), 0);  // default: full speed
 
-  // For each allowed polygon, check cells near the boundary and slow them down.
-  for (const auto & poly : allowed_polygons_) {
-    const auto & pts = poly.points;
+  for (const auto & area : areas_) {
+    const auto & pts = area.polygon.points;
     const std::size_t n = pts.size();
     if (n < 3) continue;
 
@@ -803,12 +917,10 @@ void MapServerNode::publish_speed_mask()
         pt.y = static_cast<float>(pos.y());
         pt.z = 0.0F;
 
-        // Only relevant for cells inside this allowed polygon.
-        if (!point_in_polygon(pt, poly)) {
+        if (!point_in_polygon(pt, area.polygon)) {
           continue;
         }
 
-        // Find minimum distance from cell centre to any polygon edge.
         double min_dist_sq = std::numeric_limits<double>::max();
 
         for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
@@ -850,19 +962,109 @@ void MapServerNode::publish_speed_mask()
 
   speed_mask_pub_->publish(mask);
 
-  // Publish filter info.  Nav2 SpeedFilter interprets the mask as:
-  //   speed_limit = base + multiplier * (mask_value / 100)
-  // With base=100.0, multiplier=-100.0 and a mask cell of 50:
-  //   speed_limit = 100 + (-100) * 0.50 = 50 %
-  // Cells with mask value 0 → speed_limit = 100 % (no reduction).
-  nav2_msgs::msg::CostmapFilterInfo info;
-  info.header.stamp    = mask.header.stamp;
-  info.header.frame_id = map_frame_;
-  info.type            = 1;                // SPEED_LIMIT = 1 (percentage mode)
-  info.filter_mask_topic = "/speed_mask";
-  info.base            = 100.0F;
-  info.multiplier      = -1.0F;
-  speed_filter_info_pub_->publish(info);
+  if (!speed_filter_info_sent_) {
+    nav2_msgs::msg::CostmapFilterInfo info;
+    info.header.stamp    = mask.header.stamp;
+    info.header.frame_id = map_frame_;
+    info.type            = 1;                // SPEED_LIMIT = 1 (percentage mode)
+    info.filter_mask_topic = "/speed_mask";
+    info.base            = 100.0F;
+    info.multiplier      = -1.0F;
+    speed_filter_info_pub_->publish(info);
+    speed_filter_info_sent_ = true;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boundary monitoring
+// ─────────────────────────────────────────────────────────────────────────────
+
+void MapServerNode::check_boundary_violation(double x, double y)
+{
+  if (areas_.empty()) {
+    return;
+  }
+
+  geometry_msgs::msg::Point32 pt;
+  pt.x = static_cast<float>(x);
+  pt.y = static_cast<float>(y);
+  pt.z = 0.0F;
+
+  bool inside_any = false;
+  for (const auto & area : areas_) {
+    if (point_in_polygon(pt, area.polygon)) {
+      inside_any = true;
+      break;
+    }
+  }
+
+  std_msgs::msg::Bool msg;
+  msg.data = !inside_any;
+  boundary_violation_pub_->publish(msg);
+
+  if (!inside_any) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "BOUNDARY VIOLATION: robot at (%.2f, %.2f) is outside all allowed areas!",
+      x, y);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Obstacle diff and replan triggering
+// ─────────────────────────────────────────────────────────────────────────────
+
+void MapServerNode::diff_and_update_obstacles(
+  const std::vector<mowgli_interfaces::msg::TrackedObstacle> & incoming)
+{
+  const std::size_t incoming_count = incoming.size();
+
+  if (incoming_count == last_obstacle_count_) {
+    if (replan_pending_ &&
+        (now() - last_replan_time_).seconds() >= replan_cooldown_sec_)
+    {
+      replan_pending_ = false;
+      std_msgs::msg::Bool msg;
+      msg.data = true;
+      replan_needed_pub_->publish(msg);
+      last_replan_time_ = now();
+      RCLCPP_INFO(get_logger(), "Deferred replan triggered (cooldown expired)");
+    }
+    return;
+  }
+
+  RCLCPP_INFO(get_logger(),
+    "Obstacle change detected: %zu -> %zu persistent obstacles",
+    last_obstacle_count_, incoming_count);
+
+  obstacle_polygons_.clear();
+  for (const auto & obs : incoming) {
+    if (obs.polygon.points.size() >= 3 &&
+        obs.status == mowgli_interfaces::msg::TrackedObstacle::PERSISTENT) {
+      obstacle_polygons_.push_back(obs.polygon);
+    }
+  }
+
+  last_obstacle_count_ = incoming_count;
+
+  publish_keepout_mask();
+  publish_speed_mask();
+
+  if ((now() - last_replan_time_).seconds() < replan_cooldown_sec_) {
+    replan_pending_ = true;
+    RCLCPP_INFO(get_logger(),
+      "Replan deferred (cooldown %.0fs, remaining %.0fs)",
+      replan_cooldown_sec_,
+      replan_cooldown_sec_ - (now() - last_replan_time_).seconds());
+    return;
+  }
+
+  replan_pending_ = false;
+  std_msgs::msg::Bool msg;
+  msg.data = true;
+  replan_needed_pub_->publish(msg);
+  last_replan_time_ = now();
+  RCLCPP_INFO(get_logger(), "Replan triggered due to obstacle map change");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

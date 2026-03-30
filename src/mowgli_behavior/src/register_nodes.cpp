@@ -14,6 +14,10 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<IsBatteryAbove>("IsBatteryAbove");
   factory.registerNodeType<IsCommand>("IsCommand");
 
+  factory.registerNodeType<IsGPSFixed>("IsGPSFixed");
+  factory.registerNodeType<ReplanNeeded>("ReplanNeeded");
+  factory.registerNodeType<IsBoundaryViolation>("IsBoundaryViolation");
+
   // Action nodes
   factory.registerNodeType<SetMowerEnabled>("SetMowerEnabled");
   factory.registerNodeType<StopMoving>("StopMoving");
@@ -26,6 +30,9 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<SaveSlamMap>("SaveSlamMap");
   factory.registerNodeType<BackUp>("BackUp");
   factory.registerNodeType<ClearCommand>("ClearCommand");
+  factory.registerNodeType<ReplanCoverage>("ReplanCoverage");
+  factory.registerNodeType<SaveObstacles>("SaveObstacles");
+  factory.registerNodeType<SetNavMode>("SetNavMode");
 }
 
 }  // namespace mowgli_behavior

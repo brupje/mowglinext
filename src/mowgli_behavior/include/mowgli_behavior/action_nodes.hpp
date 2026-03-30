@@ -21,8 +21,11 @@
 #include "mowgli_behavior/bt_context.hpp"
 #include "mowgli_interfaces/action/plan_coverage.hpp"
 #include "mowgli_interfaces/msg/high_level_status.hpp"
+#include "mowgli_interfaces/msg/obstacle_array.hpp"
 #include "mowgli_interfaces/srv/get_mowing_area.hpp"
 #include "mowgli_interfaces/srv/mower_control.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "std_srvs/srv/trigger.hpp"
 
 namespace mowgli_behavior {
 
@@ -204,7 +207,6 @@ public:
   static BT::PortsList providedPorts() {
     return {
       BT::InputPort<uint32_t>("area_index", 0u, "Mowing area index to plan"),
-      BT::InputPort<std::string>("boundary", "", "Mowing boundary points (optional)"),
       BT::OutputPort<std::string>("first_waypoint", "First waypoint as 'x;y;yaw'")
     };
   }
@@ -353,6 +355,85 @@ private:
   GoalHandle::SharedPtr goal_handle_;
   std::shared_future<WrappedResult> result_future_;
   bool result_requested_{false};
+};
+
+// ---------------------------------------------------------------------------
+// ReplanCoverage
+// ---------------------------------------------------------------------------
+
+/// Fetches the current mowing area + obstacles from the map server, then
+/// calls the coverage planner to generate a new path.  On success, the new
+/// path is published on the coverage_path topic (transient_local) and
+/// FollowCoveragePath will pick it up on its next tick.
+///
+/// Output ports:
+///   first_waypoint (string) – first waypoint as "x;y;yaw".
+class ReplanCoverage : public BT::StatefulActionNode {
+public:
+  using PlanCoverageAction = mowgli_interfaces::action::PlanCoverage;
+  using GoalHandle = rclcpp_action::ClientGoalHandle<PlanCoverageAction>;
+
+  ReplanCoverage(const std::string& name, const BT::NodeConfig& config)
+    : BT::StatefulActionNode(name, config) {}
+
+  static BT::PortsList providedPorts() {
+    return {
+      BT::OutputPort<std::string>("first_waypoint", "First waypoint as 'x;y;yaw'")
+    };
+  }
+
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void           onHalted() override;
+
+private:
+  rclcpp_action::Client<PlanCoverageAction>::SharedPtr action_client_;
+  std::shared_future<GoalHandle::SharedPtr> goal_handle_future_;
+  GoalHandle::SharedPtr goal_handle_;
+  std::shared_ptr<const PlanCoverageAction::Result> latest_result_;
+  bool result_received_{false};
+};
+
+// ---------------------------------------------------------------------------
+// SaveObstacles
+// ---------------------------------------------------------------------------
+
+/// Calls /obstacle_tracker/save_obstacles to persist the obstacle map to disk.
+class SaveObstacles : public BT::SyncActionNode {
+public:
+  SaveObstacles(const std::string& name, const BT::NodeConfig& config)
+    : BT::SyncActionNode(name, config) {}
+
+  static BT::PortsList providedPorts() { return {}; }
+
+  BT::NodeStatus tick() override;
+
+private:
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr client_;
+};
+
+// ---------------------------------------------------------------------------
+// SetNavMode
+// ---------------------------------------------------------------------------
+
+/// Dynamically adjusts Nav2 controller speed and costmap inflation based on
+/// GPS quality.  "precise" = full speed, "degraded" = half speed + wider
+/// inflation.
+///
+/// Input ports:
+///   mode (string) – "precise" or "degraded"
+class SetNavMode : public BT::SyncActionNode {
+public:
+  SetNavMode(const std::string& name, const BT::NodeConfig& config)
+    : BT::SyncActionNode(name, config) {}
+
+  static BT::PortsList providedPorts() {
+    return {
+      BT::InputPort<std::string>("mode", "precise", "Navigation mode: precise or degraded")
+    };
+  }
+
+  BT::NodeStatus tick() override;
 };
 
 // ---------------------------------------------------------------------------

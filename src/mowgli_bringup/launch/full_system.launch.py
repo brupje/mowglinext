@@ -267,6 +267,24 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
+    # 12. Obstacle tracker — persistent LiDAR obstacle detection
+    # ------------------------------------------------------------------
+    obstacle_tracker_params = os.path.join(
+        map_dir, "config", "obstacle_tracker.yaml"
+    )
+
+    obstacle_tracker_node = Node(
+        package="mowgli_map",
+        executable="obstacle_tracker_node",
+        name="obstacle_tracker",
+        output="screen",
+        parameters=[
+            obstacle_tracker_params,
+            {"use_sim_time": use_sim_time},
+        ],
+    )
+
+    # ------------------------------------------------------------------
     # LaunchDescription
     # ------------------------------------------------------------------
     return LaunchDescription(
@@ -286,6 +304,7 @@ def generate_launch_description() -> LaunchDescription:
             behavior_tree_node,
             map_server_node,
             coverage_planner_node,
+            obstacle_tracker_node,
             wheel_odometry_node,
             gps_pose_converter_node,
             localization_monitor_node,

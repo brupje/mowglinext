@@ -116,4 +116,40 @@ BT::NodeStatus IsCommand::tick()
     : BT::NodeStatus::FAILURE;
 }
 
+// ---------------------------------------------------------------------------
+// IsGPSFixed
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus IsGPSFixed::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+  return ctx->gps_is_fixed
+    ? BT::NodeStatus::SUCCESS
+    : BT::NodeStatus::FAILURE;
+}
+
+// ---------------------------------------------------------------------------
+// ReplanNeeded
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus ReplanNeeded::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+  return ctx->replan_needed
+    ? BT::NodeStatus::SUCCESS
+    : BT::NodeStatus::FAILURE;
+}
+
+// ---------------------------------------------------------------------------
+// IsBoundaryViolation
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus IsBoundaryViolation::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+  return ctx->boundary_violation
+    ? BT::NodeStatus::SUCCESS
+    : BT::NodeStatus::FAILURE;
+}
+
 }  // namespace mowgli_behavior
