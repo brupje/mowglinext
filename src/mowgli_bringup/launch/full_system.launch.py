@@ -98,18 +98,6 @@ def generate_launch_description() -> LaunchDescription:
         description="Port number for the Foxglove Bridge WebSocket server.",
     )
 
-    datum_lat_arg = DeclareLaunchArgument(
-        "datum_lat",
-        default_value="0.0",
-        description="Map origin latitude (WGS84 degrees).",
-    )
-
-    datum_lon_arg = DeclareLaunchArgument(
-        "datum_lon",
-        default_value="0.0",
-        description="Map origin longitude (WGS84 degrees).",
-    )
-
     # ------------------------------------------------------------------
     # Resolved substitutions
     # ------------------------------------------------------------------
@@ -122,8 +110,6 @@ def generate_launch_description() -> LaunchDescription:
     foxglove_port = LaunchConfiguration("foxglove_port")
     enable_rosbridge = LaunchConfiguration("enable_rosbridge")
     rosbridge_port = LaunchConfiguration("rosbridge_port")
-    datum_lat = LaunchConfiguration("datum_lat")
-    datum_lon = LaunchConfiguration("datum_lon")
 
     # ------------------------------------------------------------------
     # Config paths
