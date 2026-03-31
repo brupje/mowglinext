@@ -97,7 +97,10 @@ The Gazebo LiDAR (range_min=0.10m) produces self-reflections from the robot chas
 ### TODO: High Priority
 - [ ] Verify full 13329-pose coverage path completion in simulation (RPP + disabled collision monitor)
 - [ ] Build MowingAreaManager node: persistent LiDAR obstacle detection feeding into F2C replanning
-- [ ] Implement zone management: costmap filter mask publisher for keepout/speed zones
+- [x] Implement zone management: costmap filter mask publisher for keepout/speed zones
+- [x] Area recording: GUI → Go backend → ROS2 map_server_node services (add_area, set_docking_point, clear_map)
+- [x] Area persistence: auto-save/load areas and docking point to /ros2_ws/maps/areas.dat
+- [ ] Wire BT dock_pose from map_server_node/docking_pose topic instead of static parameter
 - [ ] Reduce BT log verbosity (conditional publish, rate-limit tick logging)
 - [ ] Fix Gazebo LiDAR self-reflections at source (increase range_min to 0.35m in model.sdf, rebuild image)
 

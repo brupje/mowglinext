@@ -23,6 +23,8 @@
 
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/polygon.hpp>
+#include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav2_msgs/msg/costmap_filter_info.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -37,6 +39,7 @@
 #include <mowgli_interfaces/msg/status.hpp>
 #include <mowgli_interfaces/srv/add_mowing_area.hpp>
 #include <mowgli_interfaces/srv/get_mowing_area.hpp>
+#include <mowgli_interfaces/srv/set_docking_point.hpp>
 #include <std_srvs/srv/trigger.hpp>
 
 namespace mowgli_map
@@ -139,11 +142,20 @@ private:
   void on_clear_map(const std_srvs::srv::Trigger::Request::SharedPtr req,
                     std_srvs::srv::Trigger::Response::SharedPtr res);
 
-  void on_add_no_go_zone(const mowgli_interfaces::srv::AddMowingArea::Request::SharedPtr req,
+  void on_add_area(const mowgli_interfaces::srv::AddMowingArea::Request::SharedPtr req,
                          mowgli_interfaces::srv::AddMowingArea::Response::SharedPtr res);
 
   void on_get_mowing_area(const mowgli_interfaces::srv::GetMowingArea::Request::SharedPtr req,
                           mowgli_interfaces::srv::GetMowingArea::Response::SharedPtr res);
+
+  void on_set_docking_point(const mowgli_interfaces::srv::SetDockingPoint::Request::SharedPtr req,
+                            mowgli_interfaces::srv::SetDockingPoint::Response::SharedPtr res);
+
+  void on_save_areas(const std_srvs::srv::Trigger::Request::SharedPtr req,
+                     std_srvs::srv::Trigger::Response::SharedPtr res);
+
+  void on_load_areas(const std_srvs::srv::Trigger::Request::SharedPtr req,
+                     std_srvs::srv::Trigger::Response::SharedPtr res);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -191,6 +203,18 @@ private:
   /// Parse a polygon from "x1,y1;x2,y2;..." string format.
   static geometry_msgs::msg::Polygon parse_polygon_string(const std::string& s);
 
+  /// Serialize a polygon to "x1,y1;x2,y2;..." string format.
+  static std::string polygon_to_string(const geometry_msgs::msg::Polygon& poly);
+
+  /// Save areas and docking point to a YAML file.
+  void save_areas_to_file(const std::string& path);
+
+  /// Load areas and docking point from a YAML file.
+  void load_areas_from_file(const std::string& path);
+
+  /// Reapply area classifications to the map grid (called after loading areas).
+  void apply_area_classifications();
+
   // ── Area entry ────────────────────────────────────────────────────────────
 
   /// A named area (mowing or navigation) with optional interior obstacles.
@@ -210,6 +234,7 @@ private:
   double decay_rate_per_hour_;
   double mower_width_;
   std::string map_file_path_;
+  std::string areas_file_path_;
   double publish_rate_;
 
   // ── State ─────────────────────────────────────────────────────────────────
@@ -238,6 +263,10 @@ private:
   /// (trees, flower beds, etc.).  Marked as lethal in the keepout mask.
   std::vector<geometry_msgs::msg::Polygon> obstacle_polygons_;
 
+  /// Docking point in map frame.
+  geometry_msgs::msg::Pose docking_pose_;
+  bool docking_pose_set_{false};
+
   // ── Publishers ────────────────────────────────────────────────────────────
   rclcpp::Publisher<grid_map_msgs::msg::GridMap>::SharedPtr grid_map_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr mow_progress_pub_;
@@ -255,6 +284,9 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr replan_needed_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr boundary_violation_pub_;
 
+  // Docking pose publisher (transient_local so late subscribers get the last value)
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr docking_pose_pub_;
+
   // ── Subscribers ───────────────────────────────────────────────────────────
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancy_sub_;
   rclcpp::Subscription<mowgli_interfaces::msg::Status>::SharedPtr status_sub_;
@@ -265,8 +297,11 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_map_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr load_map_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_map_srv_;
-  rclcpp::Service<mowgli_interfaces::srv::AddMowingArea>::SharedPtr add_no_go_zone_srv_;
+  rclcpp::Service<mowgli_interfaces::srv::AddMowingArea>::SharedPtr add_area_srv_;
   rclcpp::Service<mowgli_interfaces::srv::GetMowingArea>::SharedPtr get_mowing_area_srv_;
+  rclcpp::Service<mowgli_interfaces::srv::SetDockingPoint>::SharedPtr set_docking_point_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_areas_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr load_areas_srv_;
 
   // ── Timers ────────────────────────────────────────────────────────────────
   rclcpp::TimerBase::SharedPtr publish_timer_;

@@ -19,12 +19,14 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/bool.hpp>
 
 #include <grid_map_core/GridMap.hpp>
@@ -41,7 +43,7 @@ namespace mowgli_map
 // ─────────────────────────────────────────────────────────────────────────────
 
 MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
-    : rclcpp::Node("map_server", options)
+    : rclcpp::Node("map_server_node", options)
 {
   // ── Declare and read parameters ──────────────────────────────────────────
   resolution_ = declare_parameter<double>("resolution", 0.05);
@@ -51,6 +53,7 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
   decay_rate_per_hour_ = declare_parameter<double>("decay_rate_per_hour", 0.1);
   mower_width_ = declare_parameter<double>("mower_width", 0.18);
   map_file_path_ = declare_parameter<std::string>("map_file_path", "");
+  areas_file_path_ = declare_parameter<std::string>("areas_file_path", "");
   publish_rate_ = declare_parameter<double>("publish_rate", 1.0);
 
   RCLCPP_INFO(get_logger(),
@@ -66,10 +69,10 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
 
   // ── Publishers ───────────────────────────────────────────────────────────
   grid_map_pub_ =
-      create_publisher<grid_map_msgs::msg::GridMap>("map_server/grid_map", rclcpp::QoS(1));
+      create_publisher<grid_map_msgs::msg::GridMap>("~/grid_map", rclcpp::QoS(1));
 
   mow_progress_pub_ =
-      create_publisher<nav_msgs::msg::OccupancyGrid>("map_server/mow_progress", rclcpp::QoS(1));
+      create_publisher<nav_msgs::msg::OccupancyGrid>("~/mow_progress", rclcpp::QoS(1));
 
   // Costmap filter publishers: transient_local durability so that Nav2 costmap
   // filter nodes that start after this node still receive the latched message.
@@ -137,12 +140,12 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
         on_clear_map(req, res);
       });
 
-  add_no_go_zone_srv_ = create_service<mowgli_interfaces::srv::AddMowingArea>(
-      "~/add_no_go_zone",
+  add_area_srv_ = create_service<mowgli_interfaces::srv::AddMowingArea>(
+      "~/add_area",
       [this](const mowgli_interfaces::srv::AddMowingArea::Request::SharedPtr req,
              mowgli_interfaces::srv::AddMowingArea::Response::SharedPtr res)
       {
-        on_add_no_go_zone(req, res);
+        on_add_area(req, res);
       });
 
   get_mowing_area_srv_ = create_service<mowgli_interfaces::srv::GetMowingArea>(
@@ -151,6 +154,30 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
              mowgli_interfaces::srv::GetMowingArea::Response::SharedPtr res)
       {
         on_get_mowing_area(req, res);
+      });
+
+  set_docking_point_srv_ = create_service<mowgli_interfaces::srv::SetDockingPoint>(
+      "~/set_docking_point",
+      [this](const mowgli_interfaces::srv::SetDockingPoint::Request::SharedPtr req,
+             mowgli_interfaces::srv::SetDockingPoint::Response::SharedPtr res)
+      {
+        on_set_docking_point(req, res);
+      });
+
+  save_areas_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/save_areas",
+      [this](const std_srvs::srv::Trigger::Request::SharedPtr req,
+             std_srvs::srv::Trigger::Response::SharedPtr res)
+      {
+        on_save_areas(req, res);
+      });
+
+  load_areas_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/load_areas",
+      [this](const std_srvs::srv::Trigger::Request::SharedPtr req,
+             std_srvs::srv::Trigger::Response::SharedPtr res)
+      {
+        on_load_areas(req, res);
       });
 
   // ── Replanning parameters ────────────────────────────────────────────────
@@ -163,6 +190,9 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
   boundary_violation_pub_ =
       create_publisher<std_msgs::msg::Bool>("~/boundary_violation", rclcpp::QoS(1));
 
+  docking_pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>(
+      "~/docking_pose", rclcpp::QoS(1).transient_local());
+
   // ── Obstacle subscription ─────────────────────────────────────────────
   obstacle_sub_ = create_subscription<mowgli_interfaces::msg::ObstacleArray>(
       "/obstacle_tracker/obstacles",
@@ -174,6 +204,30 @@ MapServerNode::MapServerNode(const rclcpp::NodeOptions& options)
 
   // ── Load pre-defined areas from parameters ────────────────────────────
   load_areas_from_params();
+
+  // ── Auto-load persisted areas from file (overrides parameter areas) ───
+  if (!areas_file_path_.empty())
+  {
+    try
+    {
+      load_areas_from_file(areas_file_path_);
+      RCLCPP_INFO(get_logger(), "Loaded persisted areas from %s", areas_file_path_.c_str());
+    }
+    catch (const std::exception& ex)
+    {
+      RCLCPP_WARN(get_logger(), "No persisted areas to load: %s", ex.what());
+    }
+  }
+
+  // Publish docking pose if loaded (transient_local ensures late subscribers get it).
+  if (docking_pose_set_)
+  {
+    geometry_msgs::msg::PoseStamped pose_msg;
+    pose_msg.header.stamp = now();
+    pose_msg.header.frame_id = map_frame_;
+    pose_msg.pose = docking_pose_;
+    docking_pose_pub_->publish(pose_msg);
+  }
 
   // ── Publish timer ────────────────────────────────────────────────────────
   const auto period_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -614,12 +668,18 @@ void MapServerNode::on_clear_map(const std_srvs::srv::Trigger::Request::SharedPt
     std::lock_guard<std::mutex> lock(map_mutex_);
     clear_map_layers();
   }
+  areas_.clear();
+  obstacle_polygons_.clear();
+  docking_pose_set_ = false;
+  keepout_filter_info_sent_ = false;
+  speed_filter_info_sent_ = false;
+
   res->success = true;
-  res->message = "All map layers cleared.";
+  res->message = "All map layers and areas cleared.";
   RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
 }
 
-void MapServerNode::on_add_no_go_zone(
+void MapServerNode::on_add_area(
     const mowgli_interfaces::srv::AddMowingArea::Request::SharedPtr req,
     mowgli_interfaces::srv::AddMowingArea::Response::SharedPtr res)
 {
@@ -628,7 +688,7 @@ void MapServerNode::on_add_no_go_zone(
   if (polygon_msg.points.size() < 3)
   {
     res->success = false;
-    RCLCPP_WARN(get_logger(), "add_no_go_zone: polygon must have at least 3 points.");
+    RCLCPP_WARN(get_logger(), "add_area: polygon must have at least 3 points.");
     return;
   }
 
@@ -684,6 +744,19 @@ void MapServerNode::on_add_no_go_zone(
               req->is_navigation_area ? "navigation" : "mowing",
               polygon_msg.points.size(),
               req->area.obstacles.size());
+
+  // Auto-save if persistence path is set.
+  if (!areas_file_path_.empty())
+  {
+    try
+    {
+      save_areas_to_file(areas_file_path_);
+    }
+    catch (const std::exception& ex)
+    {
+      RCLCPP_WARN(get_logger(), "Auto-save after area add failed: %s", ex.what());
+    }
+  }
 
   res->success = true;
 }
@@ -1177,6 +1250,318 @@ void MapServerNode::diff_and_update_obstacles(
   replan_needed_pub_->publish(msg);
   last_replan_time_ = now();
   RCLCPP_INFO(get_logger(), "Replan triggered due to obstacle map change");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Docking point service
+// ─────────────────────────────────────────────────────────────────────────────
+
+void MapServerNode::on_set_docking_point(
+    const mowgli_interfaces::srv::SetDockingPoint::Request::SharedPtr req,
+    mowgli_interfaces::srv::SetDockingPoint::Response::SharedPtr res)
+{
+  docking_pose_ = req->docking_pose;
+  docking_pose_set_ = true;
+
+  // Publish the docking pose for other nodes (e.g., behavior tree).
+  geometry_msgs::msg::PoseStamped pose_msg;
+  pose_msg.header.stamp = now();
+  pose_msg.header.frame_id = map_frame_;
+  pose_msg.pose = docking_pose_;
+  docking_pose_pub_->publish(pose_msg);
+
+  RCLCPP_INFO(get_logger(),
+              "Docking point set: (%.3f, %.3f, %.3f) orientation (%.3f, %.3f, %.3f, %.3f)",
+              docking_pose_.position.x,
+              docking_pose_.position.y,
+              docking_pose_.position.z,
+              docking_pose_.orientation.x,
+              docking_pose_.orientation.y,
+              docking_pose_.orientation.z,
+              docking_pose_.orientation.w);
+
+  // Auto-save if persistence path is set.
+  if (!areas_file_path_.empty())
+  {
+    try
+    {
+      save_areas_to_file(areas_file_path_);
+    }
+    catch (const std::exception& ex)
+    {
+      RCLCPP_WARN(get_logger(), "Auto-save after docking point change failed: %s", ex.what());
+    }
+  }
+
+  res->success = true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Area persistence services
+// ─────────────────────────────────────────────────────────────────────────────
+
+void MapServerNode::on_save_areas(const std_srvs::srv::Trigger::Request::SharedPtr /*req*/,
+                                  std_srvs::srv::Trigger::Response::SharedPtr res)
+{
+  if (areas_file_path_.empty())
+  {
+    res->success = false;
+    res->message = "areas_file_path parameter is empty; cannot save.";
+    RCLCPP_WARN(get_logger(), "%s", res->message.c_str());
+    return;
+  }
+
+  try
+  {
+    save_areas_to_file(areas_file_path_);
+    res->success = true;
+    res->message = "Areas saved to " + areas_file_path_;
+    RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+  }
+  catch (const std::exception& ex)
+  {
+    res->success = false;
+    res->message = std::string("Save failed: ") + ex.what();
+    RCLCPP_ERROR(get_logger(), "%s", res->message.c_str());
+  }
+}
+
+void MapServerNode::on_load_areas(const std_srvs::srv::Trigger::Request::SharedPtr /*req*/,
+                                  std_srvs::srv::Trigger::Response::SharedPtr res)
+{
+  if (areas_file_path_.empty())
+  {
+    res->success = false;
+    res->message = "areas_file_path parameter is empty; cannot load.";
+    RCLCPP_WARN(get_logger(), "%s", res->message.c_str());
+    return;
+  }
+
+  try
+  {
+    load_areas_from_file(areas_file_path_);
+    apply_area_classifications();
+    res->success = true;
+    res->message = "Areas loaded from " + areas_file_path_;
+    RCLCPP_INFO(get_logger(), "%s", res->message.c_str());
+  }
+  catch (const std::exception& ex)
+  {
+    res->success = false;
+    res->message = std::string("Load failed: ") + ex.what();
+    RCLCPP_ERROR(get_logger(), "%s", res->message.c_str());
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Area persistence helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+std::string MapServerNode::polygon_to_string(const geometry_msgs::msg::Polygon& poly)
+{
+  std::ostringstream oss;
+  for (std::size_t i = 0; i < poly.points.size(); ++i)
+  {
+    if (i > 0)
+    {
+      oss << ";";
+    }
+    oss << poly.points[i].x << "," << poly.points[i].y;
+  }
+  return oss.str();
+}
+
+void MapServerNode::save_areas_to_file(const std::string& path)
+{
+  std::ofstream out(path);
+  if (!out.is_open())
+  {
+    throw std::runtime_error("Cannot open " + path + " for writing");
+  }
+
+  out << "# Mowgli ROS2 — Persisted areas and docking point\n";
+  out << "# Auto-generated by map_server_node. Do not edit manually.\n\n";
+
+  out << "area_count: " << areas_.size() << "\n\n";
+
+  for (std::size_t i = 0; i < areas_.size(); ++i)
+  {
+    const auto& area = areas_[i];
+    out << "area_" << i << "_name: " << area.name << "\n";
+    out << "area_" << i << "_polygon: " << polygon_to_string(area.polygon) << "\n";
+    out << "area_" << i << "_is_navigation: " << (area.is_navigation_area ? 1 : 0) << "\n";
+    out << "area_" << i << "_obstacle_count: " << area.obstacles.size() << "\n";
+    for (std::size_t j = 0; j < area.obstacles.size(); ++j)
+    {
+      out << "area_" << i << "_obstacle_" << j << ": " << polygon_to_string(area.obstacles[j])
+          << "\n";
+    }
+    out << "\n";
+  }
+
+  out << "docking_pose_set: " << (docking_pose_set_ ? 1 : 0) << "\n";
+  if (docking_pose_set_)
+  {
+    out << "dock_x: " << docking_pose_.position.x << "\n";
+    out << "dock_y: " << docking_pose_.position.y << "\n";
+    out << "dock_z: " << docking_pose_.position.z << "\n";
+    out << "dock_qx: " << docking_pose_.orientation.x << "\n";
+    out << "dock_qy: " << docking_pose_.orientation.y << "\n";
+    out << "dock_qz: " << docking_pose_.orientation.z << "\n";
+    out << "dock_qw: " << docking_pose_.orientation.w << "\n";
+  }
+
+  out.close();
+}
+
+void MapServerNode::load_areas_from_file(const std::string& path)
+{
+  std::ifstream in(path);
+  if (!in.is_open())
+  {
+    throw std::runtime_error("Cannot open " + path);
+  }
+
+  // Parse all key-value pairs into a map.
+  std::map<std::string, std::string> kv;
+  std::string line;
+  while (std::getline(in, line))
+  {
+    if (line.empty() || line[0] == '#')
+    {
+      continue;
+    }
+    auto colon_pos = line.find(':');
+    if (colon_pos == std::string::npos)
+    {
+      continue;
+    }
+    std::string key = line.substr(0, colon_pos);
+    std::string val = line.substr(colon_pos + 1);
+    // Trim leading whitespace from value.
+    auto start = val.find_first_not_of(" \t");
+    if (start != std::string::npos)
+    {
+      val = val.substr(start);
+    }
+    else
+    {
+      val.clear();
+    }
+    kv[key] = val;
+  }
+  in.close();
+
+  auto get_int = [&](const std::string& key, int def) -> int
+  {
+    auto it = kv.find(key);
+    return (it != kv.end()) ? std::stoi(it->second) : def;
+  };
+
+  auto get_double = [&](const std::string& key, double def) -> double
+  {
+    auto it = kv.find(key);
+    return (it != kv.end()) ? std::stod(it->second) : def;
+  };
+
+  auto get_str = [&](const std::string& key) -> std::string
+  {
+    auto it = kv.find(key);
+    return (it != kv.end()) ? it->second : std::string{};
+  };
+
+  // Clear existing areas and reload from file.
+  areas_.clear();
+  obstacle_polygons_.clear();
+
+  const int area_count = get_int("area_count", 0);
+  for (int i = 0; i < area_count; ++i)
+  {
+    const std::string prefix = "area_" + std::to_string(i);
+    AreaEntry entry;
+    entry.name = get_str(prefix + "_name");
+    entry.polygon = parse_polygon_string(get_str(prefix + "_polygon"));
+    entry.is_navigation_area = (get_int(prefix + "_is_navigation", 0) != 0);
+
+    const int obs_count = get_int(prefix + "_obstacle_count", 0);
+    for (int j = 0; j < obs_count; ++j)
+    {
+      auto obs_poly = parse_polygon_string(get_str(prefix + "_obstacle_" + std::to_string(j)));
+      if (obs_poly.points.size() >= 3)
+      {
+        entry.obstacles.push_back(obs_poly);
+        obstacle_polygons_.push_back(obs_poly);
+      }
+    }
+
+    if (entry.polygon.points.size() >= 3)
+    {
+      RCLCPP_INFO(get_logger(),
+                  "Loaded area '%s': %zu vertices, %s, %zu obstacles",
+                  entry.name.c_str(),
+                  entry.polygon.points.size(),
+                  entry.is_navigation_area ? "navigation" : "mowing",
+                  entry.obstacles.size());
+      areas_.push_back(std::move(entry));
+    }
+  }
+
+  // Load docking point.
+  docking_pose_set_ = (get_int("docking_pose_set", 0) != 0);
+  if (docking_pose_set_)
+  {
+    docking_pose_.position.x = get_double("dock_x", 0.0);
+    docking_pose_.position.y = get_double("dock_y", 0.0);
+    docking_pose_.position.z = get_double("dock_z", 0.0);
+    docking_pose_.orientation.x = get_double("dock_qx", 0.0);
+    docking_pose_.orientation.y = get_double("dock_qy", 0.0);
+    docking_pose_.orientation.z = get_double("dock_qz", 0.0);
+    docking_pose_.orientation.w = get_double("dock_qw", 1.0);
+
+    RCLCPP_INFO(get_logger(),
+                "Loaded docking point: (%.3f, %.3f)",
+                docking_pose_.position.x,
+                docking_pose_.position.y);
+  }
+
+  // Reset filter info flags so masks are republished with new areas.
+  keepout_filter_info_sent_ = false;
+  speed_filter_info_sent_ = false;
+}
+
+void MapServerNode::apply_area_classifications()
+{
+  std::lock_guard<std::mutex> lock(map_mutex_);
+  const float no_go_val = static_cast<float>(CellType::NO_GO_ZONE);
+
+  for (const auto& area : areas_)
+  {
+    grid_map::Polygon gm_polygon;
+    for (const auto& pt : area.polygon.points)
+    {
+      gm_polygon.addVertex(
+          grid_map::Position(static_cast<double>(pt.x), static_cast<double>(pt.y)));
+    }
+
+    for (grid_map::PolygonIterator it(map_, gm_polygon); !it.isPastEnd(); ++it)
+    {
+      map_.at(std::string(layers::CLASSIFICATION), *it) = no_go_val;
+    }
+
+    for (const auto& obstacle : area.obstacles)
+    {
+      grid_map::Polygon obs_gm;
+      for (const auto& pt : obstacle.points)
+      {
+        obs_gm.addVertex(
+            grid_map::Position(static_cast<double>(pt.x), static_cast<double>(pt.y)));
+      }
+      for (grid_map::PolygonIterator it(map_, obs_gm); !it.isPastEnd(); ++it)
+      {
+        map_.at(std::string(layers::CLASSIFICATION), *it) = no_go_val;
+      }
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

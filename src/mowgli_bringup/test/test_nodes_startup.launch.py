@@ -178,7 +178,7 @@ class TestNodesStartup(unittest.TestCase):
         required_topics = {
             "/wheel_odom",
             "/diagnostics",
-            "/map_server/grid_map",
+            "/map_server_node/grid_map",
             "/coverage_planner_node/coverage_path",
         }
 
