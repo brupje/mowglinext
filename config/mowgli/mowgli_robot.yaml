@@ -26,7 +26,7 @@ mowgli:
     # Drive wheels (rear, differential)
     wheel_radius: 0.04475         # m (diameter 0.0895)
     wheel_width: 0.04
-    wheel_track: 0.40             # centre-to-centre distance
+    wheel_track: 0.325            # centre-to-centre distance (YF500 measured)
     wheel_x_offset: -0.18         # behind base_link centre
     ticks_per_revolution: 1050    # encoder ticks per full wheel revolution
 
@@ -36,14 +36,10 @@ mowgli:
 
     # Mowing blade
     blade_radius: 0.09
-    tool_width: 0.18              # effective cut width (2 × blade_radius)
+    tool_width: 0.18              # effective cut width (2 x blade_radius)
 
     # =================================================================
     # Sensor positions (relative to base_link, metres)
-    #
-    # These MUST match the URDF (mowgli.urdf.xacro) for TF to be
-    # consistent.  If you move a sensor on the physical robot, update
-    # both here AND the URDF, then rebuild the image.
     #
     # Coordinate frame: x=forward, y=left, z=up (REP-103)
     # base_link is at the geometric centre of the chassis, at wheel
@@ -94,15 +90,6 @@ mowgli:
 
     use_f9r_sensor_fusion: false  # u-blox F9R dead-reckoning (experimental)
 
-# ---------------------------------------------------------------------------
-# NavSat → AbsolutePose converter
-# datum_lat/datum_lon MUST match the values above (map origin).
-# ---------------------------------------------------------------------------
-navsat_to_absolute_pose:
-  ros__parameters:
-    datum_lat: 48.8831951
-    datum_lon: 2.1661984
-
     # =================================================================
     # Docking — MUST be set to your dock's position in the map frame
     # =================================================================
@@ -122,8 +109,8 @@ navsat_to_absolute_pose:
     # Mowing — adjust to your garden
     # =================================================================
     mowing_enabled: true
-    mowing_speed: 0.5             # m/s — reduce on slopes
-    transit_speed: 0.5            # m/s — speed between zones and to dock
+    mowing_speed: 0.3             # m/s — conservative for YF500
+    transit_speed: 0.4            # m/s — speed between zones and to dock
     outline_passes: 1             # perimeter passes before fill
     outline_overlap: 0            # overlap between outline passes
     outline_offset: 0.05          # inward offset from recorded boundary (m)
@@ -155,11 +142,6 @@ navsat_to_absolute_pose:
     emergency_stop_on_lift: true
     max_obstacle_avoidance_distance: 2.0  # m — max detour around obstacle
 
-    # Hall / emergency inputs (Yardforce 500 default)
-    # Hall1+2 = front wheel lift sensors (low-active)
-    # Hall3+4 = top cover stop-button halls (low-active)
-    # emergency_input_config: "!L, !L, !S, !S"
-
     # =================================================================
     # Rain
     # =================================================================
@@ -182,3 +164,12 @@ navsat_to_absolute_pose:
     yaw_goal_tolerance: 1.0       # rad — acceptable heading error
     coverage_xy_tolerance: 0.5    # m — for coverage waypoints
     progress_timeout_sec: 60.0    # s — without progress before recovery
+
+# ---------------------------------------------------------------------------
+# NavSat -> AbsolutePose converter
+# datum_lat/datum_lon MUST match the values above (map origin).
+# ---------------------------------------------------------------------------
+navsat_to_absolute_pose:
+  ros__parameters:
+    datum_lat: 48.8831951
+    datum_lon: 2.1661984
