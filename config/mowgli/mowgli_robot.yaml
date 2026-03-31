@@ -81,13 +81,8 @@ mowgli:
     gps_timeout_sec: 5.0             # pause mowing if no fix for this long
 
     # GPS serial (direct USB connection)
-    gps_device_type: "serial"     # serial | tcp
     gps_port: "/dev/gps"
     gps_baudrate: 921600
-    # GPS over TCP (uncomment if using ser2net or remote GPS)
-    # gps_device_type: "tcp"
-    # gps_tcp_host: "10.0.0.161"
-    # gps_tcp_port: 4002
 
     # NTRIP (RTK correction stream) — required for cm-level accuracy
     ntrip_enabled: true
@@ -98,6 +93,15 @@ mowgli:
     ntrip_mountpoint: "OUIL"
 
     use_f9r_sensor_fusion: false  # u-blox F9R dead-reckoning (experimental)
+
+# ---------------------------------------------------------------------------
+# NavSat → AbsolutePose converter
+# datum_lat/datum_lon MUST match the values above (map origin).
+# ---------------------------------------------------------------------------
+navsat_to_absolute_pose:
+  ros__parameters:
+    datum_lat: 48.8831951
+    datum_lon: 2.1661984
 
     # =================================================================
     # Docking — MUST be set to your dock's position in the map frame

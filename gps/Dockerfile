@@ -4,8 +4,7 @@
 # Publishes sensor_msgs/NavSatFix on /ublox_gps_node/fix.
 # Receives RTK corrections via ntrip_client and forwards to u-blox receiver.
 #
-# The mowgli_ros2 container's navsat_to_absolute_pose node converts NavSatFix
-# into the internal AbsolutePose format for the localization pipeline.
+# All config is read from /config/mowgli_robot.yaml (bind-mounted).
 # =============================================================================
 FROM ros:jazzy-ros-base
 
@@ -17,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY ros2_entrypoint.sh /ros2_entrypoint.sh
-RUN chmod +x /ros2_entrypoint.sh
+COPY start_gps.sh /start_gps.sh
+RUN chmod +x /ros2_entrypoint.sh /start_gps.sh
 
 ENTRYPOINT ["/ros2_entrypoint.sh"]
-CMD ["bash"]
+CMD ["/start_gps.sh"]

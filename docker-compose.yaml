@@ -28,6 +28,8 @@ services:
       ros2 launch mowgli_bringup full_system.launch.py
       enable_rosbridge:=true
       enable_foxglove:=true
+      datum_lat:=${DATUM_LAT}
+      datum_lon:=${DATUM_LON}
     volumes:
       - mowgli_maps:/ros2_ws/maps
       - ./config/mowgli:/ros2_ws/config:ro
@@ -50,13 +52,13 @@ services:
     network_mode: host
     privileged: true
     devices:
-      - /dev/gps:/dev/gps
+      - ${GPS_PORT}:${GPS_PORT}
     environment:
       <<: *ros2-env
     command: >
       ros2 launch ublox_gps ublox_gps_node-launch.py
-        device_port:=/dev/gps
-        uart1.baudrate:=921600
+        device_port:=${GPS_PORT}
+        uart1.baudrate:=${GPS_BAUD}
     restart: unless-stopped
     logging:
       driver: json-file
@@ -66,7 +68,7 @@ services:
 
   # -------------------------------------------------------------------------
   # NTRIP client — feeds RTK corrections to the u-blox receiver via /rtcm
-  # Configure host/port/mountpoint in config/mowgli/mowgli_robot.yaml
+  # All settings come from .env
   # -------------------------------------------------------------------------
   ntrip:
     container_name: mowgli-ntrip
@@ -78,11 +80,11 @@ services:
     command: >
       ros2 run ntrip_client ntrip_ros
         --ros-args
-        -p host:=${NTRIP_HOST:-caster.centipede.fr}
-        -p port:=${NTRIP_PORT:-2101}
-        -p mountpoint:=${NTRIP_MOUNTPOINT:-OUIL}
-        -p username:=${NTRIP_USER:-centipede}
-        -p password:=${NTRIP_PASSWORD:-centipede}
+        -p host:=${NTRIP_HOST}
+        -p port:=${NTRIP_PORT}
+        -p mountpoint:=${NTRIP_MOUNTPOINT}
+        -p username:=${NTRIP_USER}
+        -p password:=${NTRIP_PASSWORD}
         -p authentificate:=true
     depends_on:
       - gps
