@@ -1,182 +1,169 @@
-# Mowgli in Docker
+# Mowgli Docker — v3 (ROS2 Jazzy)
 
-This container runs OpenMower Mowgli software locally or remotely.
+v3 is a complete rewrite of the container deployment.  The ROS1 stack
+(roscore, rosserial, openmower) has been replaced by a single
+`mowgli_ros2` container running ROS2 Jazzy.
 
-For an example of wiring mowgli on a yardforce mower, take a look at [this diagram.](https://app.diagrams.net/?tags=%7B%7D&lightbox=1&highlight=0000ff&edit=_blank&layers=1&nav=1&title=yardforce_wiring.drawio#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fkevinmce%2Fmowgli-docker%2Fcedbossneo%2Fdiagrams%2Fyardforce_wiring.drawio)
+## What changed from v2
 
-## Local
+| v2 (ROS1 Noetic) | v3 (ROS2 Jazzy) |
+|------------------|-----------------|
+| roscore | removed — DDS has no master |
+| rosserial | removed — hardware bridge is inside mowgli_ros2 |
+| openmower | removed — replaced by mowgli_ros2 (Nav2 + BT + coverage) |
+| foxglove-bridge (separate image) | built into mowgli_ros2, launched optionally |
+| rosbridge (separate container) | built into mowgli_ros2, enabled via launch arg |
 
-### Setup
+## Services
 
-Install docker with this command:
+| Service | Description | Port(s) |
+|---------|-------------|---------|
+| `mowgli` | ROS2 hardware bridge, Nav2, behavior trees, SLAM, rosbridge, foxglove | 9090 (rosbridge), 8765 (foxglove) |
+| `gui` | OpenMower GUI — Go backend + React frontend | host networking |
+| `mosquitto` | MQTT broker for Home Assistant and telemetry | 1883, 9001 |
+| `watchtower` | Automatic image update polling (gui only) | — |
+| `web` | Static nginx landing page | 4005 |
+
+## Quick start (local, direct serial)
+
+### 1. Install Docker
 
 ```bash
 curl https://get.docker.com | sh
 ```
 
-Create a file in udev config `/etc/udev/rules.d/50-mowgli.rules` with this content:
+### 2. udev rules (so devices get stable symlinks)
+
+Create `/etc/udev/rules.d/50-mowgli.rules`:
 
 ```
-SUBSYSTEM=="tty" ATTRS{product}=="Mowgli", SYMLINK+="mowgli"
-# simpleRTK USB
-SUBSYSTEM=="tty" ATTRS{idVendor}=="1546" ATTRS{idProduct}=="01a9", SYMLINK+="gps"
-# ESP USB CDC - RTK1010Board
-SUBSYSTEM=="tty" ATTRS{idVendor}=="303a" ATTRS{idProduct}=="4001", SYMLINK+="gps"
+# Mowgli STM32 board
+SUBSYSTEM=="tty", ATTRS{product}=="Mowgli", SYMLINK+="mowgli"
+# simpleRTK2B
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="gps"
+# RTK1010Board (ESP USB CDC)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="gps"
 ```
 
-Clone this repository
+Reload: `sudo udevadm control --reload && sudo udevadm trigger`
 
-```bash
-git clone https://github.com/cedbossneo/mowgli-docker
+### 3. Configure
+
+Edit `.env` — in most cases only `MOWER_IP` needs to be set for ser2net mode.
+The image tags default to `:v3`.
+
+If your board appears on a path other than `/dev/ttyUSB0`, create a
+`docker-compose.override.yaml`:
+
+```yaml
+services:
+  mowgli:
+    devices:
+      - /dev/mowgli:/dev/ttyUSB0
 ```
 
-The script suppose that your mowgli device is on `/dev/mowgli` and your gps on `/dev/gps`
-
-⚠ WARNING: This branch works only with the new Mowgli firmware https://github.com/cedbossneo/Mowgli that allows Mowgli to runs with vanilla OpenMower without mowgli_proxy or mowgli_blade.
-
-Edit the `.env` file to set `ROS_IP` to you host machine ip address.
-
-Finally:
+### 4. Launch
 
 ```bash
 docker compose up -d
 ```
 
-The Mowgli GUI is hosted on port 4006 of your PI.
+The GUI is available on `http://<pi-ip>:4005` (landing page) once the stack is up.
 
-The OpenMower web app is hosted on port 4005 of your PI.
+## Configuration
 
-## Remote BY Serial Redirection
+### GUI settings — `config/om/`
 
-### Setup
+Place `mower_config.sh` and any GUI-specific config files here.  This directory
+is bind-mounted read-only at `/config` inside the `gui` container.
 
-#### Mower PI
+### ROS2 parameters — `config/mowgli/`
 
-Be sure you don't run ROS along with ser2net in order to avoid conflicts
+Place YAML parameter override files here.  The directory is bind-mounted
+read-only at `/ros2_ws/config/` inside the `mowgli` container.
 
-```bash
-apt-get install -y ser2net
-systemctl enable ser2net
-```
+See [`config/mowgli/README.md`](config/mowgli/README.md) for the full list of
+overrideable files and an example.
 
-Create a file in udev config `/etc/udev/rules.d/50-mowgli.rules` with this content
+### MQTT — `config/mqtt/mosquitto.conf`
 
-```
-SUBSYSTEM=="tty" ATTRS{product}=="Mowgli", SYMLINK+="mowgli"
-# simpleRTK USB
-SUBSYSTEM=="tty" ATTRS{idVendor}=="1546" ATTRS{idProduct}=="01a9", SYMLINK+="gps"
-# ESP USB CDC - RTK1010Board
-SUBSYSTEM=="tty" ATTRS{idVendor}=="303a" ATTRS{idProduct}=="4001", SYMLINK+="gps"
-```
+Standard Mosquitto configuration file.
 
-Edit `/etc/ser2net.conf` and add theses lines on the bottom, change devices according to your setup
+## Foxglove Studio
 
-```
-# Mowgli
-4001:raw:600:/dev/mowgli:115200 NONE 1STOPBIT 8DATABITS
-# GPS
-4002:raw:600:/dev/gps:460800 NONE 1STOPBIT 8DATABITS
-```
+Foxglove Bridge runs inside the main `mowgli` container on port **8765**.
+Connect Foxglove Studio to `ws://<pi-ip>:8765`.
 
-Finally reboot your PI
-
-#### Remote Machine
-
-- Clone this repository somewhere on your system.
-- Install Docker (`curl -sSL https://get.docker.com | sh`)
-- Edit your Mowgli config in the config directory
-- Put your map in the ros directory.
-
-Edit the `.env` file to set your `MOWER_IP` to the ip of the mower AND the `ROS_IP` to the ip of the ros machine
-
-Finally, launch:
+To run Foxglove Bridge as a separate container (useful if you want to restart
+it independently):
 
 ```bash
-docker compose -f docker-compose.ser2net.yaml up
+docker compose -f docker-compose.yaml -f docker-compose.foxglove.yaml up -d
 ```
 
-or, if you want to have it in deamon mode
+When using this override, set `enable_foxglove:=false` in the mowgli service
+command inside a `docker-compose.override.yaml` to avoid the port conflict.
+
+## Deployment modes
+
+### Ser2net — remote brain, serial over TCP
+
+Use when the compute board (Pi running Docker) is separate from the mower
+board, connected via Ethernet.
+
+On the mower Pi, install and configure `ser2net` to expose `/dev/mowgli` on
+TCP port 4001 and `/dev/gps` on TCP port 4002.  Then on the brain machine:
 
 ```bash
+# Edit .env: set MOWER_IP to the mower Pi's IP
 docker compose -f docker-compose.ser2net.yaml up -d
 ```
 
-That's it !
+### Remote split — nav on a powerful host, hardware on the Pi
 
-## Remote BY Splitting OpenMower and ROSSERIAL
+Run Nav2, behavior trees, the GUI, and the map server on a desktop/server.
+Run only the hardware bridge on the mower Pi.
 
-### Setup
-
-#### Remote Host
-
-Install docker with this command:
-
-```bash
-curl https://get.docker.com | sh
-```
-
-Clone this repository
-
-```bash
-git clone https://github.com/cedbossneo/mowgli-docker
-```
-
-The script suppose that your mowgli device is on `/dev/mowgli` and your gps on `/dev/gps`
-
-⚠ WARNING: You must have the same `mower_config` on both pi and remote computer
-
-Edit the `.env` file to set your `MOWER_IP` to the ip of the mower AND the `ROS_IP` to the ip of the ros machine
-
-Finally:
-
-```bash
-docker compose -f docker-compose.remote.host.yaml up -d
-```
-
-#### Mower PI
-
-Install docker with this command :
-
-```bash
-curl https://get.docker.com | sh
-```
-
-Clone this repository
-
-```bash
-git clone https://github.com/cedbossneo/mowgli-docker
-```
-
-Edit the `.env` file to set your `MOWER_IP` to the ip of the mower AND the `ROS_IP` to the ip of the ros machine
-
-The script suppose that your mowgli device is on `/dev/mowgli` and your gps on `/dev/gps`
-
-⚠ WARNING: You must have the same `mower_config` on both pi and remote computer
-
-Finally:
+On the mower Pi (serial access required):
 
 ```bash
 docker compose -f docker-compose.remote.pi.yaml up -d
 ```
 
-## Usage
-
-### Buttons
-
-You can use the scripts in [./utils](./utils) directory to press home / start
-
-### Logs
+On the remote host:
 
 ```bash
-docker compose -f docker-compose.yaml logs -f openmower
+docker compose -f docker-compose.remote.host.yaml up -d
 ```
 
-### RViz
+Both machines must share the same `ROS_DOMAIN_ID` in `.env`.  DDS multicast
+must be routable between them (same L2 segment), or configure FastDDS unicast
+peer discovery.
 
-ROS Ports are exposed to the host machine so you can easily access RViz by setting your `ROS_MASTER_IP` to the machine where your docker container runs.
-
-### Shutdown
+## Logs
 
 ```bash
-docker compose -f docker-compose.yaml stop
+# Follow mowgli ROS2 output
+docker compose logs -f mowgli
+
+# Follow GUI
+docker compose logs -f gui
 ```
+
+## Updating
+
+Watchtower checks for a new `gui` image every 4 hours.  To update the
+`mowgli` image manually:
+
+```bash
+docker compose pull mowgli
+docker compose up -d mowgli
+```
+
+## Shutdown
+
+```bash
+docker compose down
+```
+
+SLAM maps are preserved in the `mowgli_maps` Docker volume across restarts.

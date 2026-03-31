@@ -1,63 +1,49 @@
-version: '3'
+# Remote Pi mode — hardware bridge only, no Nav2
+#
+# Run this on the Raspberry Pi (or Jetson, etc.) that is physically attached
+# to the mower board via USB serial.  It launches only the hardware bridge
+# node (mowgli.launch.py) which:
+#   - Reads STM32 telemetry from /dev/ttyUSB0 (or /dev/mowgli via udev)
+#   - Reads GNSS from /dev/gps
+#   - Publishes odometry, IMU, and motor feedback as ROS2 topics
+#   - Accepts velocity commands and blade control from the nav stack
+#
+# Nav2, behavior trees, coverage planning, and the GUI are all handled by the
+# remote host running docker-compose.remote.host.yaml.
+#
+# DDS discovery:
+#   Both machines must share the same ROS_DOMAIN_ID.  Ensure multicast is
+#   enabled on the network between the Pi and the remote host, or configure
+#   FastDDS unicast peer list.
+#
+# Launch:
+#   docker compose -f docker-compose.remote.pi.yaml up -d
+
+x-ros2-env: &ros2-env
+  ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  RCUTILS_COLORIZED_OUTPUT: "1"
+  RCUTILS_LOGGING_USE_STDOUT: "1"
 
 services:
 
-  rosserial:
-    container_name: mowgli-rosserial
-    image: ${IMAGE}
+  mowgli:
+    container_name: mowgli-hardware
+    image: ${MOWGLI_ROS2_IMAGE}
     network_mode: host
-    #pull_policy: always
-    tty: true
     privileged: true
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    environment:
+      <<: *ros2-env
+    # Hardware-only launch: serial bridge to STM32, GPS, basic TF publishers.
+    # No Nav2, no behavior tree, no map server, no rosbridge.
+    command: ros2 launch mowgli_bringup mowgli.launch.py
+    volumes:
+      - ./config/mowgli:/ros2_ws/config:ro
+    restart: unless-stopped
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-file: "5"
         max-size: 10m
-    environment:
-      ROS_MASTER_URI: http://${ROS_IP}:11311
-      ROS_IP: ${MOWER_IP}
-      ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config
-      ROSOUT_DISABLE_FILE_LOGGING: true
-    command:
-      - /opt/ros/noetic/bin/rosrun
-      - rosserial_server
-      - serial_node
-      - _port:=/dev/mowgli
-      - _baud:=115200
-    tmpfs: /root/.ros/log/
-    volumes:
-      - ./config/om:/config:ro
-      - ./ros:/root/.ros/
-      - /etc/timezone:/etc/timezone:ro
-      - /dev:/dev
-    restart: unless-stopped
-
-  gps:
-    container_name: mowgli-gps
-    image: ${IMAGE}
-    network_mode: host
-    #pull_policy: always
-    tty: true
-    privileged: true
-    command:
-      - /home/ubuntu/scripts/start_gps.sh
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "5"
-        max-size: 10m
-    environment:
-      ROS_MASTER_URI: http://${ROS_IP}:11311
-      ROS_IP: ${ROS_IP}
-      ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config   # comment this line out to enable more logs
-      ROSOUT_DISABLE_FILE_LOGGING: true                   # comment this line out to enable more logs
-    tmpfs: /root/.ros/log                          # comment this line out to enable persistent logs
-    volumes:
-      - ./config/om:/config:ro
-      - ./mower_params:/root/mower_params:ro
-      - ./params:/opt/open_mower_ros/src/open_mower/params:ro
-      - ./ros:/root/.ros/
-      - /etc/timezone:/etc/timezone:ro
-      - /dev:/dev
-    restart: unless-stopped

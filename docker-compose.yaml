@@ -1,156 +1,115 @@
-version: '3'
+# Mowgli ROS2 v3 — main deployment
+# Requires Docker Compose v2.20+ (no version key needed)
+
+x-ros2-env: &ros2-env
+  ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  RCUTILS_COLORIZED_OUTPUT: "1"
+  RCUTILS_LOGGING_USE_STDOUT: "1"
 
 services:
-  watchtower:
-    image: ghcr.io/nicholas-fedor/watchtower:latest
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      WATCHTOWER_CLEANUP: 'true'   # cleanup old openmower-gui images
-      WATCHTOWER_POLL_INTERVAL: 14400   # update check intervall in seconds - eg 14400 = 4h
-      WATCHTOWER_DEBUG: 'false'
-      WATCHTOWER_LABEL_ENABLE: 'true'
-  gui:
-    container_name: openmower-gui
-    labels:
-      "com.centurylinklabs.watchtower.enable": true
-      project: openmower
-      app: gui
-    image: ghcr.io/cedbossneo/openmower-gui:v2
-    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Main ROS2 robot service
+  # Runs the full mowgli_ros2 stack: hardware bridge, Nav2, behavior trees,
+  # coverage planning, SLAM map server, rosbridge (port 9090), and optionally
+  # foxglove_bridge (port 8765).
+  # -------------------------------------------------------------------------
+  mowgli:
+    container_name: mowgli-ros2
+    image: ${MOWGLI_ROS2_IMAGE}
     network_mode: host
     privileged: true
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
     environment:
-      ROS_IP: ${ROS_IP}
-      ROS_MASTER_URI: http://${ROS_IP}:11311
+      <<: *ros2-env
+    command: >
+      ros2 launch mowgli_bringup full_system.launch.py
+      enable_rosbridge:=true
+      enable_foxglove:=true
+    volumes:
+      - mowgli_maps:/ros2_ws/maps
+      - ./config/mowgli:/ros2_ws/config:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: 10m
+
+  # -------------------------------------------------------------------------
+  # OpenMower GUI — Go backend + React frontend
+  # Connects to mowgli's rosbridge WebSocket on ws://localhost:9090
+  # -------------------------------------------------------------------------
+  gui:
+    container_name: openmower-gui
+    image: ${GUI_IMAGE}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      project: openmower
+      app: gui
+    network_mode: host
+    environment:
+      ROSBRIDGE_URL: ws://localhost:9090
       MOWER_CONFIG_FILE: /config/mower_config.sh
       DOCKER_HOST: unix:///var/run/docker.sock
       DB_PATH: /db
-    depends_on:
-      - roscore
     volumes:
-      - /dev:/dev
       - ./config/db:/db
-      - ./config/om:/config
+      - ./config/om:/config:ro
       - /var/run/docker.sock:/var/run/docker.sock
-  web:
-    container_name: mowgli-web
-    labels:
-      project: openmower
-      app: web
-    image: nginx
-    ports:
-      - 4005:80
-    volumes:
-      - ./web:/usr/share/nginx/html:ro
+    depends_on:
+      - mowgli
     restart: unless-stopped
 
+  # -------------------------------------------------------------------------
+  # MQTT broker — Home Assistant integration and general pub/sub
+  # -------------------------------------------------------------------------
   mosquitto:
     container_name: mowgli-mqtt
+    image: eclipse-mosquitto:latest
     labels:
       project: openmower
       app: mqtt
     hostname: mosquitto
-    image: eclipse-mosquitto:latest
     ports:
-      - 1883:1883
-      - 9001:9001
+      - "1883:1883"
+      - "9001:9001"
     volumes:
       - ./config/mqtt/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     restart: unless-stopped
 
-  roscore:
-    container_name: mowgli-roscore
-    labels:
-      project: openmower
-      app: roscore
-    image: ${IMAGE}
-    network_mode: host
-    #pull_policy: always
-    tty: true
-    privileged: true
-    command:
-      - /opt/ros/noetic/bin/roscore
-    environment:
-      ROS_IP: ${ROS_IP}
-      ROS_MASTER_URI: http://${ROS_IP}:11311
-      ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config
-      ROSOUT_DISABLE_FILE_LOGGING: true
-    tmpfs: /root/.ros/log/
+  # -------------------------------------------------------------------------
+  # Watchtower — automatic image update polling (watches gui by label)
+  # -------------------------------------------------------------------------
+  watchtower:
+    container_name: mowgli-watchtower
+    image: ghcr.io/nicholas-fedor/watchtower:latest
     volumes:
-      - ./config/om:/config
-      - ./ros:/root/.ros/
-      - /etc/timezone:/etc/timezone:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "14400"
+      WATCHTOWER_DEBUG: "false"
+      WATCHTOWER_LABEL_ENABLE: "true"
     restart: unless-stopped
 
-  rosserial:
-    container_name: mowgli-rosserial
+  # -------------------------------------------------------------------------
+  # Static nginx landing page — served on port 4005
+  # -------------------------------------------------------------------------
+  web:
+    container_name: mowgli-web
+    image: nginx:alpine
     labels:
       project: openmower
-      app: rosserial
-    image: ${IMAGE}
-    network_mode: host
-    #pull_policy: always
-    tty: true
-    privileged: true
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "5"
-        max-size: 10m
-    environment:
-      ROS_MASTER_URI: http://${ROS_IP}:11311
-      ROS_IP: ${ROS_IP}
-      ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config
-      ROSOUT_DISABLE_FILE_LOGGING: true
-    command:
-      - /opt/ros/noetic/bin/rosrun
-      - rosserial_server
-      - serial_node
-      - _port:=/dev/mowgli
-      - _baud:=115200
-    tmpfs: /root/.ros/log/
+      app: web
+    ports:
+      - "4005:80"
     volumes:
-      - ./ros:/root/.ros/
-      - ./config/om:/config
-      - /etc/timezone:/etc/timezone:ro
-      - /dev:/dev
-    depends_on:
-      - roscore
+      - ./web:/usr/share/nginx/html:ro
     restart: unless-stopped
 
-  openmower:
-    container_name: mowgli-openmower
-    labels:
-      project: openmower
-      app: openmower
-    image: ${IMAGE}
-    network_mode: host
-    #pull_policy: always
-    tty: true
-    privileged: true
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "5"
-        max-size: 10m
-    environment:
-      ROS_MASTER_URI: http://${ROS_IP}:11311
-      ROS_IP: ${ROS_IP}
-      OM_HEATMAP_SENSOR_IDS: ""
-      OM_PARAMS_PATH: /opt/open_mower_ros/src/open_mower/params
-      OM_NO_COMMS: true #FALSE if you are using other board than mowgli
-      ROSCONSOLE_CONFIG_FILE: /config/rosconsole.config   # comment this line out to enable more logs
-      ROSOUT_DISABLE_FILE_LOGGING: true                   # comment this line out to enable more logs
-    tmpfs: /root/.ros/log                          # comment this line out to enable persistent logs
-    volumes:
-      - ./config/om:/config
-      - ./mower_params:/root/mower_params:ro
-      - ./params:/opt/open_mower_ros/src/open_mower/params:ro
-      - ./ros:/root/.ros/
-      - /etc/timezone:/etc/timezone:ro
-      - /dev:/dev
-    depends_on:
-      - rosserial
-    restart: unless-stopped
+volumes:
+  # Persists SLAM maps across container restarts and image updates
+  mowgli_maps:
