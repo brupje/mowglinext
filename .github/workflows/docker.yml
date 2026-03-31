@@ -14,13 +14,95 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   # github.repository is "owner/repo", lower-cased automatically by GHCR
-  IMAGE_NAME: ${{ github.repository }}/mowgli-ros2
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/mowgli-ros2
 
+# ─── Build per arch on native runners, then merge into multi-arch manifest ────
 jobs:
-  # ─── Build, Test & Push ──────────────────────────────────────────────────────
-  docker-build:
-    name: Build Docker image (${{ matrix.target }})
+  # ─── Stage 1: Build each (target × arch) on native runners ─────────────────
+  build:
+    name: Build ${{ matrix.target }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.builder }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [runtime, simulation]
+        arch: [linux/amd64, linux/arm64]
+        include:
+          - arch: linux/amd64
+            builder: ${{ vars.CUSTOM_RUNNER_AMD64 || 'buildjet-4vcpu-ubuntu-2204' }}
+          - arch: linux/arm64
+            builder: ${{ vars.CUSTOM_RUNNER_ARM64 || 'buildjet-4vcpu-ubuntu-2204-arm' }}
+          - target: runtime
+            suffix: ""
+          - target: simulation
+            suffix: "-sim"
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}${{ matrix.suffix }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: ${{ matrix.arch }}
+          build-args: |
+            BUILD_TYPE=Release
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}${{ matrix.suffix }}:buildcache-${{ matrix.arch == 'linux/arm64' && 'arm64' || 'amd64' }}
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}${{ matrix.suffix }}:buildcache-${{ matrix.arch == 'linux/arm64' && 'arm64' || 'amd64' }},mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }}${{ matrix.suffix }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Sanitise arch name for artifact
+        run: |
+          clean=${{ matrix.arch }}
+          clean=${clean////-}
+          echo "ARTIFACT_NAME=${clean}" >> "$GITHUB_ENV"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.target }}-${{ env.ARTIFACT_NAME }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─── Stage 2: Merge per-arch digests into multi-arch manifest ───────────────
+  merge:
+    name: Merge manifest (${{ matrix.target }})
     runs-on: ubuntu-24.04
+    needs: build
 
     strategy:
       fail-fast: false
@@ -36,17 +118,17 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU (for multi-platform builds)
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-${{ matrix.target }}-*
+          merge-multiple: true
+          path: /tmp/digests
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -57,43 +139,29 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.suffix }}
+          images: ${{ env.IMAGE_NAME }}${{ matrix.suffix }}
           tags: |
-            # Branch push: tag as branch name
             type=ref,event=branch
-            # Tag push: tag as semver (v1.2.3 → 1.2.3 + latest)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            # Always include full SHA
             type=sha,prefix=sha-,format=short
 
-      - name: Build image (with inline test run)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: ${{ matrix.target }}
-          platforms: linux/amd64,linux/arm64
-          # Build the 'build' stage first so tests run, then produce the target stage.
-          # The build stage in the Dockerfile already runs colcon test and will fail
-          # the image build if any test fails.
-          build-args: |
-            BUILD_TYPE=Release
-          # Cache from GHCR to speed up repeated builds
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.suffix }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.suffix }}:buildcache,mode=max
-          # Push only on non-PR events (tags and main branch pushes)
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Enable provenance for supply-chain attestation
-          provenance: true
-          sbom: true
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE_NAME }}${{ matrix.suffix }}@sha256:%s ' *)
 
-  # ─── Notify on failure ───────────────────────────────────────────────────────
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE_NAME }}${{ matrix.suffix }}:${{ steps.meta.outputs.version }}
+
+  # ─── Notify on failure ─────────────────────────────────────────────────────
   notify-failure:
     name: Notify on failure
     runs-on: ubuntu-24.04
-    needs: docker-build
+    needs: [build, merge]
     if: failure() && github.ref == 'refs/heads/main'
 
     steps:
@@ -104,7 +172,6 @@ jobs:
             const title = `Docker build failed on main — ${new Date().toISOString().split('T')[0]}`;
             const body = `The Docker CI workflow failed on \`main\`.\n\n` +
               `Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
-            // Only create an issue; do not spam if one already exists for today.
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
