@@ -118,11 +118,13 @@ services:
     environment:
       ROSBRIDGE_URL: ws://localhost:9090
       MOWER_CONFIG_FILE: /config/mower_config.sh
+      MOWER_YAML_CONFIG_FILE: /mowgli_config/mowgli_robot.yaml
       DOCKER_HOST: unix:///var/run/docker.sock
       DB_PATH: /db
     volumes:
       - ./config/db:/db
       - ./config/om:/config:ro
+      - ./config/mowgli:/mowgli_config
       - /var/run/docker.sock:/var/run/docker.sock
       - /dev/bus/usb:/dev/bus/usb
     depends_on:
