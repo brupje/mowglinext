@@ -53,41 +53,7 @@
       </Fallback>
 
       <!-- ================================================================
-           GUARD 3: Rain detection (reactive — interrupts mowing)
-           Dock, wait until rain stops (max 12h), then 30 min delay.
-           If rain doesn't stop after 12h, return to idle.
-           ================================================================ -->
-      <Fallback name="RainGuard">
-        <Inverter><IsRainDetected/></Inverter>
-        <Sequence name="RainDockSequence">
-          <SetMowerEnabled enabled="false"/>
-          <StopMoving/>
-          <PublishHighLevelStatus state="1" state_name="RAIN_DETECTED_DOCKING"/>
-          <SaveObstacles/>
-          <SaveSlamMap map_path="/ros2_ws/maps/garden_map"/>
-          <Fallback name="RainNavOrStay">
-            <NavigateToPose goal="{dock_pose}"/>
-            <AlwaysSuccess/>
-          </Fallback>
-          <PublishHighLevelStatus state="1" state_name="RAIN_WAITING"/>
-          <!-- Poll rain sensor every 30s, max ~12 hours (1440 attempts) -->
-          <RetryUntilSuccessful num_attempts="1440">
-            <Fallback>
-              <Inverter><IsRainDetected/></Inverter>
-              <Sequence>
-                <WaitForDuration duration_sec="30.0"/>
-                <AlwaysFailure/>
-              </Sequence>
-            </Fallback>
-          </RetryUntilSuccessful>
-          <!-- Rain stopped — wait 30 min before resuming -->
-          <PublishHighLevelStatus state="1" state_name="RAIN_DELAY"/>
-          <WaitForDuration duration_sec="1800.0"/>
-        </Sequence>
-      </Fallback>
-
-      <!-- ================================================================
-           GUARD 4: GPS quality adaptation (reactive)
+           GUARD 3: GPS quality adaptation (reactive)
            ================================================================ -->
       <Fallback name="GPSModeSelector">
         <Sequence name="PreciseMode">
@@ -160,6 +126,53 @@
           <Fallback name="CoverageWithRecovery">
 
             <ReactiveSequence name="AdaptiveCoverage">
+
+              <!-- Reactive rain check: pause mowing, dock, wait, resume -->
+              <Fallback name="RainGuard">
+                <Inverter><IsRainDetected/></Inverter>
+                <Sequence name="RainDockAndResume">
+                  <SetMowerEnabled enabled="false"/>
+                  <StopMoving/>
+                  <PublishHighLevelStatus state="1" state_name="RAIN_DETECTED_DOCKING"/>
+                  <SaveObstacles/>
+                  <SaveSlamMap map_path="/ros2_ws/maps/garden_map"/>
+                  <Fallback name="RainNavOrStay">
+                    <NavigateToPose goal="{dock_pose}"/>
+                    <AlwaysSuccess/>
+                  </Fallback>
+                  <PublishHighLevelStatus state="1" state_name="RAIN_WAITING"/>
+                  <!-- Wait for rain to stop, max ~12h -->
+                  <RetryUntilSuccessful num_attempts="1440">
+                    <Fallback>
+                      <Inverter><IsRainDetected/></Inverter>
+                      <Sequence>
+                        <WaitForDuration duration_sec="30.0"/>
+                        <AlwaysFailure/>
+                      </Sequence>
+                    </Fallback>
+                  </RetryUntilSuccessful>
+                  <PublishHighLevelStatus state="1" state_name="RAIN_DELAY"/>
+                  <WaitForDuration duration_sec="1800.0"/>
+                  <!-- Rain over — undock and resume mowing -->
+                  <PublishHighLevelStatus state="2" state_name="RESUMING_AFTER_RAIN"/>
+                  <Fallback name="RainResumeUndock">
+                    <RetryUntilSuccessful num_attempts="3">
+                      <Sequence>
+                        <BackUp backup_dist="1.5" backup_speed="0.15"/>
+                        <WaitForDuration duration_sec="2.0"/>
+                        <Inverter><IsCharging/></Inverter>
+                      </Sequence>
+                    </RetryUntilSuccessful>
+                    <Sequence>
+                      <StopMoving/>
+                      <PublishHighLevelStatus state="1" state_name="UNDOCK_FAILED"/>
+                      <ClearCommand/>
+                      <AlwaysFailure/>
+                    </Sequence>
+                  </Fallback>
+                  <PublishHighLevelStatus state="2" state_name="MOWING"/>
+                </Sequence>
+              </Fallback>
 
               <!-- Reactive battery check -->
               <Fallback name="BatteryGuard">
