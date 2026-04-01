@@ -510,24 +510,26 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                             x-decorator="FormItem"/>
                     </SchemaField>
                 </FormLayout>
-                <Modal
-                    title="Firmware logs"
-                    width={"70%"}
-                    open={(data && data.length > 0)}
-                    cancelButtonProps={{style: {display: "none"}}}
-                    onOk={() => {
-                        setData([])
-                    }}
-                >
-                    <StyledTerminal>
-                        <Terminal colorMode={ColorMode.Dark}>
-                            {(data ?? []).map((line, index) => {
-                                return <TerminalOutput key={index}>{line}</TerminalOutput>;
-                            })}
-                        </Terminal>
-                    </StyledTerminal>
-                </Modal>
             </Col>
+            <Modal
+                title="Firmware logs"
+                width={"70%"}
+                open={(data && data.length > 0)}
+                cancelButtonProps={{style: {display: "none"}}}
+                okButtonProps={{disabled: isFlashing}}
+                onOk={() => {
+                    setData([])
+                }}
+                zIndex={1100}
+            >
+                <StyledTerminal>
+                    <Terminal colorMode={ColorMode.Dark}>
+                        {(data ?? []).map((line, index) => {
+                            return <TerminalOutput key={index}>{line}</TerminalOutput>;
+                        })}
+                    </Terminal>
+                </StyledTerminal>
+            </Modal>
             <Col span={24} style={{
                 position: "fixed",
                 bottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 20,
