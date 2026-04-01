@@ -16,6 +16,33 @@ const StatusTag = ({label, active, color}: { label: string; active: boolean; col
     <Tag color={active ? (color ?? "green") : "default"}>{label}</Tag>
 );
 
+/**
+ * Derive a single charging label from power + status data.
+ * Avoids showing 3 separate badges for the same info.
+ */
+function chargingLabel(chargerEnabled: boolean, isCharging: boolean): { label: string; active: boolean; color: string } {
+    if (isCharging) {
+        return {label: "Charging", active: true, color: "cyan"};
+    }
+    if (chargerEnabled) {
+        return {label: "Charger On", active: true, color: "green"};
+    }
+    return {label: "Not Charging", active: false, color: "default"};
+}
+
+/**
+ * Derive a single emergency label from emergency data.
+ */
+function emergencyLabel(active: boolean, latched: boolean, reason?: string): { label: string; color: string } {
+    if (active) {
+        return {label: reason ? `Emergency: ${reason}` : "EMERGENCY", color: "red"};
+    }
+    if (latched) {
+        return {label: reason ?? "Latched (press play to release)", color: "orange"};
+    }
+    return {label: "Clear", color: "default"};
+}
+
 export function StatusComponent({compact}: {compact?: boolean}) {
     const {colors} = useThemeMode();
     const status = useStatus();
@@ -24,6 +51,8 @@ export function StatusComponent({compact}: {compact?: boolean}) {
     const dockingSensor = useDockingSensor();
 
     const mowerStatusLabel = status.MowerStatus === 255 ? "OK" : "Initializing";
+    const charging = chargingLabel(!!power.ChargerEnabled, !!status.IsCharging);
+    const emg = emergencyLabel(!!emergency.ActiveEmergency, !!emergency.LatchedEmergency, emergency.Reason);
 
     if (compact) {
         return (
@@ -47,14 +76,9 @@ export function StatusComponent({compact}: {compact?: boolean}) {
                     </Flex>
                     <div style={{borderTop: `1px solid ${colors.borderSubtle}`, paddingTop: 8, marginBottom: 8}}>
                         <Flex wrap gap="small">
-                            <StatusTag label={emergency.ActiveEmergency ? "EMERGENCY" : "Clear"}
-                                       active={!!emergency.ActiveEmergency} color="red"/>
-                            {emergency.Reason ?
-                                <Tag color="red">{emergency.Reason}</Tag> : null}
+                            <Tag color={emg.color}>{emg.label}</Tag>
                             <StatusTag label={dockingSensor.DockPresent ? "Dock: Present" : "Dock: Away"}
                                        active={!!dockingSensor.DockPresent} color="cyan"/>
-                            <StatusTag label={`Distance: ${dockingSensor.DockDistance?.toFixed(2) ?? "-"}`}
-                                       active={(dockingSensor.DockDistance ?? 0) > 0} color="cyan"/>
                         </Flex>
                     </div>
                 </div>
@@ -140,12 +164,7 @@ export function StatusComponent({compact}: {compact?: boolean}) {
                     </Col>
                 </Row>
                 <Flex wrap gap="small" style={{marginTop: 12}}>
-                    <StatusTag label={power.ChargerEnabled ? "Charger On" : "Charger Off"}
-                               active={!!power.ChargerEnabled}/>
-                    <StatusTag label={status.IsCharging ? "Charging" : "Not Charging"}
-                               active={!!status.IsCharging} color="cyan"/>
-                    {power.ChargerStatus ?
-                        <Tag>{power.ChargerStatus}</Tag> : null}
+                    <Tag color={charging.color}>{charging.label}</Tag>
                 </Flex>
             </Card>
         </Col>
@@ -155,12 +174,7 @@ export function StatusComponent({compact}: {compact?: boolean}) {
             <Card title={<Space><WarningOutlined/> Emergency</Space>} size="small"
                   styles={{body: {paddingBottom: 12}}}>
                 <Flex wrap gap="small" align="center">
-                    <StatusTag label={emergency.ActiveEmergency ? "ACTIVE" : "Clear"}
-                               active={!!emergency.ActiveEmergency} color="red"/>
-                    <StatusTag label={emergency.LatchedEmergency ? "Latched" : "Not Latched"}
-                               active={!!emergency.LatchedEmergency} color="orange"/>
-                    {emergency.Reason ?
-                        <Tag color="red">{emergency.Reason}</Tag> : null}
+                    <Tag color={emg.color}>{emg.label}</Tag>
                 </Flex>
             </Card>
         </Col>
