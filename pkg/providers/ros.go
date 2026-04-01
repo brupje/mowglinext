@@ -185,9 +185,17 @@ func (r *RosProvider) initRosbridgeSubscriptions() {
 		if adapt, ok := adapters[key]; ok {
 			fn := adapt // capture
 			err := r.client.Subscribe(def.ROS2Topic, def.MsgType, "gui-"+key, func(msg json.RawMessage) {
-				converted, err := fn([]byte(msg))
+				adapted, err := fn([]byte(msg))
 				if err != nil {
 					logrus.Errorf("RosProvider: adapt %s: %v", key, err)
+					return
+				}
+				// Adapter output uses Go structs with json:"snake_case" tags;
+				// the frontend expects PascalCase keys, so convert.
+				converted, err := snakeToPascalJSON(adapted)
+				if err != nil {
+					logrus.Errorf("RosProvider: transform adapted %s: %v", key, err)
+					r.fanOut(key, adapted) // fallback
 					return
 				}
 				r.fanOut(key, converted)
