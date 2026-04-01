@@ -1,39 +1,52 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Mowgli ROS2 v3 — Install / Upgrade Script
+# Mowgli ROS2 v3 — Interactive Install / Upgrade / Diagnose Script
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/cedbossneo/mowgli-ros2/main/mowgli-docker/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/cedbossneo/mowgli-docker/v3/install.sh | bash
 #   # or locally:
-#   ./install.sh
-#
-# What it does:
-#   1. Installs Docker + Docker Compose (if missing)
-#   2. Adds current user to the docker group
-#   3. Installs udev rules for Mowgli, GPS, LiDAR
-#   4. Clones or updates the mowgli-docker directory
-#   5. Creates .env from template (preserving existing values on upgrade)
-#   6. Creates default config files if missing
-#   7. Pulls latest images
-#   8. Starts the stack
+#   ./install.sh            # full install + diagnostics
+#   ./install.sh --check    # diagnostics only (skip install)
 # =============================================================================
 
 set -euo pipefail
 
-# ── Colours ──────────────────────────────────────────────────────────────────
+# ── Colours & helpers ───────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No colour
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
 
-info()  { echo -e "${GREEN}[+]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
+info()  { echo -e "  ${GREEN}OK${NC}  $*"; }
+warn()  { echo -e "  ${YELLOW}!!${NC}  $*"; }
+fail()  { echo -e "  ${RED}FAIL${NC}  $*"; }
 error() { echo -e "${RED}[x]${NC} $*" >&2; }
-step()  { echo -e "\n${CYAN}=== $* ===${NC}"; }
+step()  { echo -e "\n${CYAN}${BOLD}── $* ──${NC}"; }
+ask()   { echo -en "${BOLD}$1${NC} "; }
 
-# ── Configuration ────────────────────────────────────────────────────────────
-REPO_URL="https://github.com/cedbossneo/mowgli-ros2.git"
+# Prompt with default value.  Usage: result=$(prompt "Question?" "default")
+prompt() {
+  local answer
+  ask "$1 [${2:-}]:"
+  read -r answer
+  echo "${answer:-$2}"
+}
+
+# Yes/no prompt.  Usage: if confirm "Continue?"; then ...
+confirm() {
+  local answer
+  ask "$1 [Y/n]:"
+  read -r answer
+  [[ "${answer,,}" != "n" ]]
+}
+
+command_exists() { command -v "$1" &>/dev/null; }
+
+# ── Configuration ───────────────────────────────────────────────────────────
+REPO_URL="https://github.com/cedbossneo/mowgli-docker.git"
 REPO_BRANCH="v3"
 INSTALL_DIR="${MOWGLI_HOME:-$HOME/mowgli-docker}"
 UDEV_RULES_FILE="/etc/udev/rules.d/50-mowgli.rules"
@@ -43,157 +56,113 @@ GPS_IMAGE_DEFAULT="ghcr.io/cedbossneo/mowgli-docker/gps:v3"
 LIDAR_IMAGE_DEFAULT="ghcr.io/cedbossneo/mowgli-docker/lidar:v3"
 GUI_IMAGE_DEFAULT="ghcr.io/cedbossneo/openmower-gui:v3"
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+CHECK_ONLY=false
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=true
 
-command_exists() { command -v "$1" &>/dev/null; }
+# Track issues for the final summary
+ISSUES=()
+add_issue() { ISSUES+=("$1"); }
 
+# ── Sudo helper ─────────────────────────────────────────────────────────────
 require_root_for() {
   if [ "$(id -u)" -ne 0 ]; then
-    warn "$1 requires root privileges"
     SUDO="sudo"
   else
     SUDO=""
   fi
 }
 
-# ── Step 1: Docker ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# INSTALL STEPS (skipped with --check)
+# ═══════════════════════════════════════════════════════════════════════════
+
 install_docker() {
-  step "Docker"
+  step "1/6  Docker"
 
   if command_exists docker; then
-    local ver
-    ver=$(docker --version 2>/dev/null | head -1)
-    info "Docker already installed: $ver"
+    info "Docker $(docker --version 2>/dev/null | grep -oP '[\d.]+'| head -1)"
   else
     info "Installing Docker..."
     curl -fsSL https://get.docker.com | sh
     info "Docker installed"
   fi
 
-  # Ensure docker compose v2 is available
   if docker compose version &>/dev/null; then
-    local compose_ver
-    compose_ver=$(docker compose version --short 2>/dev/null)
-    info "Docker Compose: $compose_ver"
+    info "Docker Compose $(docker compose version --short 2>/dev/null)"
   else
-    error "Docker Compose v2 not found. Please install docker-compose-plugin."
+    error "Docker Compose v2 not found. Install docker-compose-plugin."
     exit 1
   fi
 
-  # Add user to docker group if needed
   if ! groups "$USER" | grep -qw docker 2>/dev/null; then
-    info "Adding $USER to the docker group..."
-    require_root_for "Adding user to docker group"
+    require_root_for "docker group"
     $SUDO usermod -aG docker "$USER"
-    warn "You may need to log out and back in for group changes to take effect."
+    warn "Added $USER to docker group — log out/in for it to take effect"
   fi
 }
 
-# ── Step 2: udev rules ─────────────────────────────────────────────────────
 install_udev_rules() {
-  step "udev rules"
-
-  require_root_for "Installing udev rules"
+  step "2/6  udev rules"
+  require_root_for "udev rules"
 
   local rules
   rules=$(cat <<'RULES'
 # Mowgli ROS2 v3 — device symlinks
-# Installed by mowgli-docker/install.sh
-
-# Mowgli STM32 board
 SUBSYSTEM=="tty", ATTRS{product}=="Mowgli", SYMLINK+="mowgli", MODE="0666"
-
-# GPS: simpleRTK2B (u-blox F9P)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="gps", MODE="0666"
-# GPS: RTK1010Board (ESP USB CDC)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="4001", SYMLINK+="gps", MODE="0666"
-
-# LiDAR: LD19 connected via hardware UART /dev/ttyS1 (230400 baud)
-# No udev rule needed — ttyS1 is a fixed kernel device
 RULES
 )
 
-  if [ -f "$UDEV_RULES_FILE" ]; then
-    local existing
-    existing=$(cat "$UDEV_RULES_FILE")
-    if [ "$existing" = "$rules" ]; then
-      info "udev rules already up to date"
-      return
-    fi
-    warn "Updating existing udev rules at $UDEV_RULES_FILE"
+  if [ -f "$UDEV_RULES_FILE" ] && [ "$(cat "$UDEV_RULES_FILE")" = "$rules" ]; then
+    info "udev rules up to date"
+  else
+    echo "$rules" | $SUDO tee "$UDEV_RULES_FILE" > /dev/null
+    $SUDO udevadm control --reload-rules
+    $SUDO udevadm trigger
+    info "udev rules installed"
   fi
-
-  echo "$rules" | $SUDO tee "$UDEV_RULES_FILE" > /dev/null
-  $SUDO udevadm control --reload-rules
-  $SUDO udevadm trigger
-  info "udev rules installed and reloaded"
 }
 
-# ── Step 3: Clone / update repo ────────────────────────────────────────────
 setup_directory() {
-  step "Mowgli Docker directory"
+  step "3/6  Repository"
 
   if [ -d "$INSTALL_DIR/.git" ]; then
-    info "Updating existing installation at $INSTALL_DIR"
+    info "Updating $INSTALL_DIR"
     git -C "$INSTALL_DIR" fetch origin
     git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH"
-    info "Updated to latest"
   elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/docker-compose.yaml" ]; then
-    info "Existing installation found at $INSTALL_DIR (not a git repo, skipping update)"
+    info "Existing installation at $INSTALL_DIR (not a git repo, skipping)"
   else
     info "Cloning mowgli-docker to $INSTALL_DIR"
-    git clone --branch "$REPO_BRANCH" --depth 1 --filter=blob:none \
-      --sparse "$REPO_URL" "$INSTALL_DIR.tmp"
-    cd "$INSTALL_DIR.tmp"
-    git sparse-checkout set mowgli-docker
-    # Move contents up from mowgli-docker/ subfolder
-    mv mowgli-docker/* mowgli-docker/.* "$INSTALL_DIR" 2>/dev/null || true
-    cd /
-    rm -rf "$INSTALL_DIR.tmp"
-    info "Cloned to $INSTALL_DIR"
+    git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"
   fi
 }
 
-# ── Step 4: .env ────────────────────────────────────────────────────────────
 setup_env() {
-  step "Environment (.env)"
+  step "4/6  Environment (.env)"
 
   local env_file="$INSTALL_DIR/.env"
 
   if [ -f "$env_file" ]; then
-    info "Existing .env found — preserving your settings"
-
-    # Ensure all required keys exist (add missing ones from defaults)
+    info "Existing .env found — checking for missing keys"
     local needs_update=false
 
-    grep -q "^MOWGLI_ROS2_IMAGE=" "$env_file" || {
-      echo "MOWGLI_ROS2_IMAGE=$MOWGLI_ROS2_IMAGE_DEFAULT" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^GPS_IMAGE=" "$env_file" || {
-      echo "GPS_IMAGE=$GPS_IMAGE_DEFAULT" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^LIDAR_IMAGE=" "$env_file" || {
-      echo "LIDAR_IMAGE=$LIDAR_IMAGE_DEFAULT" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^GUI_IMAGE=" "$env_file" || {
-      echo "GUI_IMAGE=$GUI_IMAGE_DEFAULT" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^ROS_DOMAIN_ID=" "$env_file" || {
-      echo "ROS_DOMAIN_ID=0" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^LIDAR_PORT=" "$env_file" || {
-      echo "LIDAR_PORT=/dev/ttyS1" >> "$env_file"
-      needs_update=true
-    }
-    grep -q "^LIDAR_BAUD=" "$env_file" || {
-      echo "LIDAR_BAUD=230400" >> "$env_file"
-      needs_update=true
-    }
+    for pair in \
+      "MOWGLI_ROS2_IMAGE=$MOWGLI_ROS2_IMAGE_DEFAULT" \
+      "GPS_IMAGE=$GPS_IMAGE_DEFAULT" \
+      "LIDAR_IMAGE=$LIDAR_IMAGE_DEFAULT" \
+      "GUI_IMAGE=$GUI_IMAGE_DEFAULT" \
+      "ROS_DOMAIN_ID=0" \
+      "LIDAR_PORT=/dev/ttyS1" \
+      "LIDAR_BAUD=230400" \
+    ; do
+      local key="${pair%%=*}"
+      if ! grep -q "^${key}=" "$env_file"; then
+        echo "$pair" >> "$env_file"
+        needs_update=true
+      fi
+    done
 
     if $needs_update; then
       warn "Added missing keys to .env"
@@ -201,195 +170,518 @@ setup_env() {
       info ".env is complete"
     fi
   else
-    info "Creating .env from template"
     cat > "$env_file" <<EOF
-# Mowgli ROS2 v3 — Environment configuration
-# Edit this file, then run: docker compose up -d
-
-# ROS2 Domain ID — all containers must share the same value for DDS discovery
 ROS_DOMAIN_ID=0
-
-# IP of the mower Pi (only needed for ser2net mode)
 MOWER_IP=10.0.0.161
-
-# LiDAR serial port and baud rate (LD19 on hardware UART)
 LIDAR_PORT=/dev/ttyS1
 LIDAR_BAUD=230400
-
-# Docker images
 MOWGLI_ROS2_IMAGE=$MOWGLI_ROS2_IMAGE_DEFAULT
 GPS_IMAGE=$GPS_IMAGE_DEFAULT
 LIDAR_IMAGE=$LIDAR_IMAGE_DEFAULT
 GUI_IMAGE=$GUI_IMAGE_DEFAULT
 EOF
-    info "Created $env_file — edit it to set your MOWER_IP"
+    info "Created $env_file"
   fi
 }
 
-# ── Step 5: Config files ───────────────────────────────────────────────────
-setup_config() {
-  step "Configuration files"
+# ── Interactive configuration ───────────────────────────────────────────────
+interactive_config() {
+  step "5/6  Mower configuration"
 
-  # Ensure config directories exist
+  local yaml_file="$INSTALL_DIR/config/mowgli/mowgli_robot.yaml"
   mkdir -p "$INSTALL_DIR/config/mowgli"
   mkdir -p "$INSTALL_DIR/config/om"
   mkdir -p "$INSTALL_DIR/config/mqtt"
   mkdir -p "$INSTALL_DIR/config/db"
 
-  # Mosquitto config
+  # Mosquitto
   if [ ! -f "$INSTALL_DIR/config/mqtt/mosquitto.conf" ]; then
     cat > "$INSTALL_DIR/config/mqtt/mosquitto.conf" <<'EOF'
 log_type error
 log_type warning
 log_type information
-
 listener 1883
 allow_anonymous true
-
 listener 9001
 protocol websockets
 allow_anonymous true
 EOF
-    info "Created default mosquitto.conf"
-  else
-    info "mosquitto.conf already exists"
+    info "Created mosquitto.conf"
   fi
 
-  # mowgli_robot.yaml
-  if [ ! -f "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" ]; then
-    warn "No mowgli_robot.yaml found — you MUST configure GPS datum and dock pose"
-    warn "Edit: $INSTALL_DIR/config/mowgli/mowgli_robot.yaml"
-    # The file ships with the repo, so if we cloned it should be there.
-    # If running standalone install, create a minimal one.
-    if [ ! -f "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" ]; then
-      cat > "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" <<'EOF'
+  # If config already exists, ask whether to reconfigure
+  if [ -f "$yaml_file" ]; then
+    info "mowgli_robot.yaml already exists"
+    if ! confirm "Do you want to reconfigure it?"; then
+      return
+    fi
+  fi
+
+  echo ""
+  echo -e "${BOLD}Let's configure your mower. You can change these later in:${NC}"
+  echo -e "  ${DIM}$yaml_file${NC}"
+  echo ""
+
+  # GPS datum
+  echo -e "${CYAN}GPS Datum${NC} — coordinates of your docking station (WGS84)"
+  echo -e "${DIM}Find them on Google Maps: right-click your dock location > copy coordinates${NC}"
+  local datum_lat datum_lon
+  datum_lat=$(prompt "  Latitude?" "0.0")
+  datum_lon=$(prompt "  Longitude?" "0.0")
+
+  if [[ "$datum_lat" == "0.0" || "$datum_lon" == "0.0" ]]; then
+    warn "Datum is 0.0/0.0 — GPS localisation won't work until you set real coordinates"
+    add_issue "Set your GPS datum in $yaml_file (datum_lat / datum_lon)"
+  fi
+
+  # NTRIP
+  echo ""
+  echo -e "${CYAN}NTRIP RTK${NC} — correction stream for centimetre-level GPS accuracy"
+  echo -e "${DIM}Free in France: caster.centipede.fr (user: centipede / pass: centipede)${NC}"
+  local ntrip_enabled="false"
+  local ntrip_host="" ntrip_port="2101" ntrip_user="" ntrip_password="" ntrip_mountpoint=""
+
+  if confirm "  Enable NTRIP corrections?"; then
+    ntrip_enabled="true"
+    ntrip_host=$(prompt "  NTRIP host?" "caster.centipede.fr")
+    ntrip_port=$(prompt "  NTRIP port?" "2101")
+    ntrip_user=$(prompt "  NTRIP user?" "centipede")
+    ntrip_password=$(prompt "  NTRIP password?" "centipede")
+    ntrip_mountpoint=$(prompt "  Mountpoint (base station)?" "")
+    if [[ -z "$ntrip_mountpoint" ]]; then
+      warn "No mountpoint set — NTRIP won't connect"
+      add_issue "Set ntrip_mountpoint in $yaml_file to your nearest base station"
+    fi
+  fi
+
+  # Write YAML
+  cat > "$yaml_file" <<EOF
 # Mowgli ROS2 — Site-specific configuration
-# MUST be edited for your installation!
 # Full reference: docker exec mowgli-ros2 cat /ros2_ws/install/mowgli_bringup/share/mowgli_bringup/config/mowgli_robot.yaml
 
 mowgli:
   ros__parameters:
-    # GPS datum — set to coordinates near your docking station
-    datum_lat: 0.0
-    datum_lon: 0.0
+    datum_lat: $datum_lat
+    datum_lon: $datum_lon
 
-    # NTRIP RTK correction
-    ntrip_enabled: false
-    ntrip_host: ""
-    ntrip_port: 2101
-    ntrip_user: ""
-    ntrip_password: ""
-    ntrip_mountpoint: ""
+    gps_port: "/dev/gps"
+    gps_baudrate: 921600
 
-    # Dock position in map frame (read from /gps/pose after manual positioning)
+    ntrip_enabled: $ntrip_enabled
+    ntrip_host: "$ntrip_host"
+    ntrip_port: $ntrip_port
+    ntrip_user: "$ntrip_user"
+    ntrip_password: "$ntrip_password"
+    ntrip_mountpoint: "$ntrip_mountpoint"
+
     dock_pose_x: 0.0
     dock_pose_y: 0.0
     dock_pose_yaw: 0.0
+
+navsat_to_absolute_pose:
+  ros__parameters:
+    datum_lat: $datum_lat
+    datum_lon: $datum_lon
 EOF
-    fi
-  else
-    info "mowgli_robot.yaml already exists"
-  fi
 
-  # mower_config.sh (GUI)
+  info "Wrote $yaml_file"
+
+  # mower_config.sh for GUI
   if [ ! -f "$INSTALL_DIR/config/om/mower_config.sh" ]; then
-    warn "No mower_config.sh found — GUI settings will use defaults"
-    warn "Edit: $INSTALL_DIR/config/om/mower_config.sh"
-    if [ ! -f "$INSTALL_DIR/config/om/mower_config.sh" ]; then
-      cat > "$INSTALL_DIR/config/om/mower_config.sh" <<'EOF'
-# Mowgli ROS2 v3 — GUI configuration
-# Edit this file to match your mower hardware and location.
-
-export OM_MOWER="YardForce500"
-export OM_MOWER_ESC_TYPE="xesc_mini"
-export OM_MOWER_GAMEPAD="xbox360"
-
-# GPS — MUST be set for your location
-export OM_USE_RELATIVE_POSITION=False
-export OM_DATUM_LAT=0.0
-export OM_DATUM_LONG=0.0
+    cat > "$INSTALL_DIR/config/om/mower_config.sh" <<EOF
+export OM_DATUM_LAT=$datum_lat
+export OM_DATUM_LONG=$datum_lon
 export OM_GPS_PROTOCOL=UBX
 export OM_GPS_PORT=/dev/gps
 export OM_GPS_BAUDRATE=921600
-
-# NTRIP RTK
-export OM_USE_NTRIP=False
-export OM_NTRIP_HOSTNAME=""
-export OM_NTRIP_PORT=2101
-export OM_NTRIP_USER=""
-export OM_NTRIP_PASSWORD=""
-export OM_NTRIP_ENDPOINT=""
-
-# Mowing
+export OM_USE_NTRIP=$( [[ "$ntrip_enabled" == "true" ]] && echo "True" || echo "False" )
+export OM_NTRIP_HOSTNAME=$ntrip_host
+export OM_NTRIP_PORT=$ntrip_port
+export OM_NTRIP_USER=$ntrip_user
+export OM_NTRIP_PASSWORD=$ntrip_password
+export OM_NTRIP_ENDPOINT=$ntrip_mountpoint
 export OM_TOOL_WIDTH=0.13
 export OM_ENABLE_MOWER=true
 export OM_AUTOMATIC_MODE=0
-
-# Battery (25.2V 7S Li-ion)
 export OM_BATTERY_FULL_VOLTAGE=28.5
 export OM_BATTERY_EMPTY_VOLTAGE=24.0
 export OM_BATTERY_CRITICAL_VOLTAGE=23.0
 EOF
-    fi
-  else
-    info "mower_config.sh already exists"
+    info "Wrote mower_config.sh"
   fi
 }
 
-# ── Step 6: Pull & start ───────────────────────────────────────────────────
 pull_and_start() {
-  step "Pull images & start"
+  step "6/6  Pull & start"
 
   cd "$INSTALL_DIR"
-
   info "Pulling latest images..."
-  docker compose pull
-
+  docker compose pull 2>&1 | tail -5
   info "Starting the stack..."
-  docker compose up -d
+  docker compose up -d 2>&1 | tail -5
+  info "Stack started — waiting 20s for containers to initialise..."
+  sleep 20
+}
 
-  echo ""
-  info "Mowgli ROS2 v3 is running!"
-  echo ""
-  echo "  Foxglove Studio:  ws://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):8765"
-  echo "  Rosbridge:        ws://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):9090"
-  echo "  MQTT:             $(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):1883"
-  echo ""
-  echo "  Logs:             docker compose logs -f mowgli"
-  echo "  Stop:             docker compose down"
-  echo "  Config:           $INSTALL_DIR/config/"
-  echo ""
+# ═══════════════════════════════════════════════════════════════════════════
+# E2E HEALTH CHECKS
+# ═══════════════════════════════════════════════════════════════════════════
 
-  # Check if devices exist
-  local missing_devices=false
-  for dev in /dev/mowgli /dev/gps /dev/ttyS1; do
-    if [ ! -e "$dev" ]; then
-      warn "Device $dev not found — plug in the hardware and check udev rules"
-      missing_devices=true
+check_devices() {
+  step "Check: Hardware devices"
+
+  for dev_info in "/dev/mowgli:Mowgli STM32 board" "/dev/gps:GPS receiver (u-blox F9P)" "/dev/ttyS1:LiDAR serial port"; do
+    local dev="${dev_info%%:*}"
+    local name="${dev_info#*:}"
+    if [ -e "$dev" ]; then
+      info "$name ($dev)"
+    else
+      fail "$name ($dev) — not found"
+      case "$dev" in
+        /dev/mowgli)
+          add_issue "Mowgli board not detected. Flash the Mowgli firmware to the STM32 board and connect it via USB."
+          echo -e "       ${DIM}Firmware: https://github.com/cedbossneo/Mowgli${NC}"
+          echo -e "       ${DIM}Flash with: STM32CubeProgrammer or st-flash${NC}"
+          ;;
+        /dev/gps)
+          add_issue "GPS not detected. Connect the u-blox F9P (or compatible) via USB."
+          echo -e "       ${DIM}If connected, check: lsusb | grep -i u-blox${NC}"
+          echo -e "       ${DIM}Then verify udev rules: cat /etc/udev/rules.d/50-mowgli.rules${NC}"
+          ;;
+        /dev/ttyS1)
+          add_issue "LiDAR serial port not found. Check if your board has /dev/ttyS1 (hardware UART)."
+          echo -e "       ${DIM}If using a different port, edit LIDAR_PORT in .env${NC}"
+          ;;
+      esac
     fi
   done
-  if $missing_devices; then
-    echo ""
-    warn "Some devices are missing. The mowgli container may restart until they appear."
-    warn "Check: ls -l /dev/mowgli /dev/gps /dev/ttyS1"
+}
+
+check_containers() {
+  step "Check: Containers"
+
+  cd "$INSTALL_DIR" 2>/dev/null || cd "$(dirname "$(realpath "$0")")"
+
+  local all_ok=true
+  for svc in mowgli gps lidar gui mosquitto; do
+    local container
+    case $svc in
+      mowgli)    container="mowgli-ros2" ;;
+      gps)       container="mowgli-gps" ;;
+      lidar)     container="mowgli-lidar" ;;
+      gui)       container="openmower-gui" ;;
+      mosquitto) container="mowgli-mqtt" ;;
+    esac
+
+    local status
+    status=$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo "missing")
+    if [[ "$status" == "running" ]]; then
+      local uptime
+      uptime=$(docker inspect -f '{{.State.StartedAt}}' "$container" 2>/dev/null | cut -dT -f2 | cut -d. -f1)
+      info "$svc ($container) — running since $uptime"
+    else
+      fail "$svc ($container) — $status"
+      all_ok=false
+      if [[ "$status" == "missing" ]]; then
+        add_issue "Container $container not found. Run: docker compose up -d"
+      else
+        add_issue "Container $container is $status. Check logs: docker compose logs $svc --tail 30"
+      fi
+    fi
+  done
+
+  # Check for crashed ROS nodes inside mowgli
+  if docker inspect -f '{{.State.Status}}' mowgli-ros2 2>/dev/null | grep -q running; then
+    local dead_nodes
+    dead_nodes=$(docker compose logs mowgli --tail 200 2>&1 | grep -oP "process has died.*cmd '([^']+)'" | grep -oP "(?<=cmd ')[^']+" | xargs -I{} basename {} 2>/dev/null | sort -u || true)
+    if [[ -n "$dead_nodes" ]]; then
+      warn "Crashed nodes inside mowgli-ros2:"
+      echo "$dead_nodes" | while read -r node; do
+        echo -e "       ${RED}$node${NC}"
+      done
+      add_issue "Some ROS nodes crashed inside mowgli-ros2. Check: docker compose logs mowgli | grep 'process has died'"
+    fi
   fi
 }
 
-# ── Main ────────────────────────────────────────────────────────────────────
+check_firmware() {
+  step "Check: Mowgli firmware"
+
+  if ! docker inspect -f '{{.State.Status}}' mowgli-ros2 2>/dev/null | grep -q running; then
+    warn "mowgli-ros2 not running — skipping firmware check"
+    return
+  fi
+
+  # Check if hardware_bridge is publishing /status
+  local status_data
+  status_data=$(docker exec mowgli-ros2 bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && timeout 5 ros2 topic echo /status --once 2>/dev/null" 2>/dev/null || echo "")
+
+  if [[ -z "$status_data" ]]; then
+    fail "No data on /status — hardware bridge cannot communicate with Mowgli board"
+    add_issue "Mowgli firmware not responding. Ensure the STM32 is flashed with Mowgli firmware and /dev/mowgli is accessible."
+    echo -e "       ${DIM}Flash firmware: https://github.com/cedbossneo/Mowgli${NC}"
+    echo -e "       ${DIM}Check serial: docker compose logs mowgli | grep hardware_bridge${NC}"
+  else
+    local mower_status
+    mower_status=$(echo "$status_data" | grep "mower_status:" | awk '{print $2}')
+    if [[ "$mower_status" == "255" ]]; then
+      warn "Firmware reporting mower_status=255 (not initialised)"
+      add_issue "Mowgli board is connected but reporting uninitialised state. Press the power button on the mower or check the firmware."
+    else
+      info "Firmware responding — mower_status=$mower_status"
+    fi
+
+    # Show key status fields
+    local charging esc_power
+    charging=$(echo "$status_data" | grep "is_charging:" | awk '{print $2}')
+    esc_power=$(echo "$status_data" | grep "esc_power:" | awk '{print $2}')
+    echo -e "       ${DIM}Charging: $charging | ESC power: $esc_power${NC}"
+  fi
+}
+
+check_gps() {
+  step "Check: GPS"
+
+  if ! docker inspect -f '{{.State.Status}}' mowgli-gps 2>/dev/null | grep -q running; then
+    warn "mowgli-gps not running — skipping GPS check"
+    return
+  fi
+
+  # Check GPS fix
+  local fix_data
+  fix_data=$(docker exec mowgli-gps bash -c "source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /ublox_gps_node/fix --once 2>/dev/null" 2>/dev/null || echo "")
+
+  if [[ -z "$fix_data" ]]; then
+    fail "No GPS fix data on /ublox_gps_node/fix"
+    add_issue "GPS not publishing. Check: docker compose logs gps --tail 30"
+    return
+  fi
+
+  local lat lon status_val cov
+  lat=$(echo "$fix_data" | grep "latitude:" | awk '{print $2}')
+  lon=$(echo "$fix_data" | grep "longitude:" | awk '{print $2}')
+  status_val=$(echo "$fix_data" | grep -A1 "status:" | grep "status:" | tail -1 | awk '{print $2}')
+  cov=$(echo "$fix_data" | grep -m1 "^- " | awk '{print $2}')
+
+  local accuracy
+  accuracy=$(echo "$cov" | awk '{printf "%.2f", sqrt($1)}')
+
+  # NavSatStatus: -1=no fix, 0=fix, 1=SBAS(RTK float), 2=GBAS(RTK fixed)
+  # Some ublox driver versions don't map carrSoln correctly, so also check accuracy
+  local acc_num
+  acc_num=$(echo "$accuracy" | awk '{printf "%d", $1 * 100}')  # cm
+
+  if [[ "$status_val" == "2" ]] || [[ "$acc_num" -le 5 && "$acc_num" -gt 0 ]]; then
+    info "GPS: RTK FIXED — ${accuracy}m accuracy (lat=$lat lon=$lon)"
+  elif [[ "$status_val" == "1" ]] || [[ "$acc_num" -le 20 && "$acc_num" -gt 0 ]]; then
+    info "GPS: RTK FLOAT — ${accuracy}m accuracy (lat=$lat lon=$lon)"
+  elif [[ "$status_val" == "0" ]]; then
+    warn "GPS: Standard fix — ${accuracy}m accuracy (no RTK corrections)"
+  else
+    fail "GPS: No fix (status=$status_val)"
+  fi
+
+  # Check NTRIP
+  local ntrip_logs
+  ntrip_logs=$(docker compose logs gps --tail 50 2>&1)
+
+  if echo "$ntrip_logs" | grep -q "Connected to http"; then
+    local ntrip_url
+    ntrip_url=$(echo "$ntrip_logs" | grep -oP "Connected to \K[^ ]+" | tail -1)
+    info "NTRIP connected: $ntrip_url"
+  elif echo "$ntrip_logs" | grep -q "Unable to connect"; then
+    fail "NTRIP connection failed"
+    add_issue "NTRIP cannot connect. Check ntrip_host and ntrip_mountpoint in config/mowgli/mowgli_robot.yaml"
+  elif echo "$ntrip_logs" | grep -q "Network is unreachable"; then
+    fail "NTRIP: network unreachable"
+    add_issue "No internet connection for NTRIP. Check your network configuration."
+  fi
+
+  if echo "$ntrip_logs" | grep -q "Forwarded.*RTCM messages"; then
+    local rtcm_count
+    rtcm_count=$(echo "$ntrip_logs" | grep -oP "Forwarded \K\d+" | tail -1)
+    info "RTCM bridge: $rtcm_count corrections forwarded to GPS"
+  elif echo "$ntrip_logs" | grep -q "NTRIP enabled: true"; then
+    warn "RTCM bridge not forwarding yet — RTK may take a few minutes to converge"
+  fi
+
+  # Check datum
+  local datum_lat datum_lon
+  datum_lat=$(grep "datum_lat:" "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" 2>/dev/null | head -1 | awk '{print $2}')
+  datum_lon=$(grep "datum_lon:" "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" 2>/dev/null | head -1 | awk '{print $2}')
+
+  if [[ "$datum_lat" == "0.0" || "$datum_lon" == "0.0" || -z "$datum_lat" ]]; then
+    fail "GPS datum is 0.0/0.0 — robot position will be wrong"
+    add_issue "Set datum_lat and datum_lon in config/mowgli/mowgli_robot.yaml to your docking station coordinates"
+  else
+    info "Datum: $datum_lat, $datum_lon"
+  fi
+}
+
+check_lidar() {
+  step "Check: LiDAR"
+
+  if ! docker inspect -f '{{.State.Status}}' mowgli-lidar 2>/dev/null | grep -q running; then
+    warn "mowgli-lidar not running — skipping LiDAR check"
+    return
+  fi
+
+  local scan_check
+  scan_check=$(docker exec mowgli-ros2 bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && ros2 topic info /scan 2>/dev/null" 2>/dev/null || echo "")
+
+  local pub_count
+  pub_count=$(echo "$scan_check" | grep "Publisher count:" | awk '{print $3}')
+
+  if [[ "$pub_count" -ge 1 ]] 2>/dev/null; then
+    info "LiDAR publishing on /scan ($pub_count publisher)"
+  else
+    fail "No publisher on /scan — LiDAR data not reaching ROS"
+    add_issue "LiDAR not publishing. Check: docker compose logs lidar --tail 20"
+    echo -e "       ${DIM}Verify serial port: ls -l \$(grep LIDAR_PORT .env | cut -d= -f2)${NC}"
+  fi
+}
+
+check_slam() {
+  step "Check: SLAM & Navigation"
+
+  if ! docker inspect -f '{{.State.Status}}' mowgli-ros2 2>/dev/null | grep -q running; then
+    warn "mowgli-ros2 not running — skipping SLAM check"
+    return
+  fi
+
+  # Check SLAM toolbox
+  local slam_state
+  slam_state=$(docker exec mowgli-ros2 bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && ros2 topic info /slam_toolbox/pose 2>/dev/null" 2>/dev/null || echo "")
+
+  if echo "$slam_state" | grep -q "Publisher count: [1-9]"; then
+    info "SLAM toolbox active"
+  else
+    warn "SLAM toolbox not publishing poses"
+    add_issue "SLAM not active. It needs LiDAR data on /scan to start mapping."
+  fi
+
+  # Check if map exists
+  local map_exists
+  map_exists=$(docker exec mowgli-ros2 bash -c "ls /ros2_ws/maps/garden_map.posegraph 2>/dev/null && echo yes || echo no" 2>/dev/null || echo "no")
+
+  if [[ "$map_exists" == *"yes"* ]]; then
+    info "Saved map found (lifelong/localisation mode available)"
+  else
+    warn "No saved map — SLAM running in mapping mode"
+    echo -e "       ${DIM}Drive the mower around to create a map, then dock to save it${NC}"
+  fi
+}
+
+check_gui() {
+  step "Check: GUI & connectivity"
+
+  if ! docker inspect -f '{{.State.Status}}' openmower-gui 2>/dev/null | grep -q running; then
+    fail "openmower-gui not running"
+    add_issue "GUI container not running. Run: docker compose up -d gui"
+    return
+  fi
+
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+
+  # Check if GUI port is listening
+  if curl -sf -o /dev/null --connect-timeout 3 "http://$ip:80" 2>/dev/null || \
+     curl -sf -o /dev/null --connect-timeout 3 "http://localhost:80" 2>/dev/null; then
+    info "GUI accessible at http://$ip"
+  else
+    warn "GUI might be starting up — try http://$ip in your browser"
+  fi
+
+  # Check rosbridge
+  local rb_info
+  rb_info=$(docker exec mowgli-ros2 bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && ros2 node list 2>/dev/null" 2>/dev/null | grep rosbridge || echo "")
+  if [[ -n "$rb_info" ]]; then
+    info "Rosbridge WebSocket active (ws://$ip:9090)"
+  else
+    warn "Rosbridge node not found — GUI may not receive live data"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}Access points:${NC}"
+  echo -e "    GUI:       ${CYAN}http://$ip${NC}"
+  echo -e "    Foxglove:  ${CYAN}ws://$ip:8765${NC}"
+  echo -e "    Rosbridge: ${CYAN}ws://$ip:9090${NC}"
+  echo -e "    MQTT:      ${CYAN}$ip:1883${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FINAL SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════
+
+print_summary() {
+  echo ""
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════${NC}"
+
+  if [[ ${#ISSUES[@]} -eq 0 ]]; then
+    echo -e "${GREEN}${BOLD}  All checks passed! Your mower is ready.${NC}"
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${BOLD}Next steps:${NC}"
+    echo -e "  1. Open the GUI in your browser"
+    echo -e "  2. Record your garden boundary (Areas tab)"
+    echo -e "  3. Set dock position (drive mower to dock, save pose)"
+    echo -e "  4. Start mowing!"
+  else
+    echo -e "${YELLOW}${BOLD}  ${#ISSUES[@]} issue(s) to resolve:${NC}"
+    echo -e "${CYAN}${BOLD}══════════════════════════════════════════════${NC}"
+    echo ""
+    local i=1
+    for issue in "${ISSUES[@]}"; do
+      echo -e "  ${YELLOW}${i}.${NC} $issue"
+      ((i++))
+    done
+    echo ""
+    echo -e "  ${DIM}Fix these issues, then re-run:${NC}"
+    echo -e "  ${BOLD}./install.sh --check${NC}"
+  fi
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
 
 main() {
   echo ""
-  echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║     Mowgli ROS2 v3 — Installer          ║${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+  echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}${BOLD}║       Mowgli ROS2 v3 — Setup & Diagnose     ║${NC}"
+  echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 
-  install_docker
-  install_udev_rules
-  setup_directory
-  setup_env
-  setup_config
-  pull_and_start
+  if ! $CHECK_ONLY; then
+    install_docker
+    install_udev_rules
+    setup_directory
+    setup_env
+    interactive_config
+    pull_and_start
+  else
+    INSTALL_DIR="${MOWGLI_HOME:-$HOME/mowgli-docker}"
+    if [ ! -f "$INSTALL_DIR/docker-compose.yaml" ]; then
+      error "No installation found at $INSTALL_DIR — run without --check first"
+      exit 1
+    fi
+    cd "$INSTALL_DIR"
+    echo -e "${DIM}Running diagnostics on $INSTALL_DIR${NC}"
+  fi
+
+  echo ""
+  echo -e "${CYAN}${BOLD}══ System Health Check ══${NC}"
+
+  check_devices
+  check_containers
+  check_firmware
+  check_gps
+  check_lidar
+  check_slam
+  check_gui
+
+  print_summary
 }
 
 main "$@"
