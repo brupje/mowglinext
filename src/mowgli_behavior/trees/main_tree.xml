@@ -129,11 +129,24 @@
         <Sequence name="MowingSequence">
           <IsCommand command="1"/>
 
-          <!-- Undock: reverse away from charger (non-fatal — skip if not docked) -->
+          <!-- Undock: reverse away from charger, verify we left the dock.
+               If still charging after 3 attempts, abort mowing. -->
           <PublishHighLevelStatus state="2" state_name="UNDOCKING"/>
-          <Fallback name="UndockOrSkip">
-            <BackUp backup_dist="1.5" backup_speed="0.15"/>
-            <AlwaysSuccess/>
+          <Fallback name="UndockOrAbort">
+            <RetryUntilSuccessful num_attempts="3" name="UndockRetry">
+              <Sequence name="UndockAndVerify">
+                <BackUp backup_dist="1.5" backup_speed="0.15"/>
+                <WaitForDuration duration_sec="2.0"/>
+                <Inverter><IsCharging/></Inverter>
+              </Sequence>
+            </RetryUntilSuccessful>
+            <!-- Undock failed — stop and return to idle -->
+            <Sequence name="UndockFailed">
+              <StopMoving/>
+              <PublishHighLevelStatus state="1" state_name="UNDOCK_FAILED"/>
+              <ClearCommand/>
+              <AlwaysFailure/>
+            </Sequence>
           </Fallback>
 
           <!-- Compute coverage path via opennav_coverage server -->
@@ -169,11 +182,15 @@
                       </Sequence>
                     </Fallback>
                   </RetryUntilSuccessful>
-                  <!-- Charged — undock and resume from where we left off.
-                       ExecuteSwathBySwath reads ctx->next_swath_index to
-                       resume from the last incomplete swath. -->
+                  <!-- Charged — undock and verify, then resume mowing -->
                   <PublishHighLevelStatus state="2" state_name="RESUMING_UNDOCKING"/>
-                  <BackUp backup_dist="1.5" backup_speed="0.15"/>
+                  <RetryUntilSuccessful num_attempts="3" name="ResumeUndockRetry">
+                    <Sequence>
+                      <BackUp backup_dist="1.5" backup_speed="0.15"/>
+                      <WaitForDuration duration_sec="2.0"/>
+                      <Inverter><IsCharging/></Inverter>
+                    </Sequence>
+                  </RetryUntilSuccessful>
                   <PublishHighLevelStatus state="2" state_name="MOWING"/>
                 </Sequence>
               </Fallback>
