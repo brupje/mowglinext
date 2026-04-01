@@ -64,22 +64,11 @@ ekf_odom:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    # GPS motion heading from ublox NavPVT.
-    # Fuse absolute yaw only — the ublox driver reports high covariance
-    # when stationary (heading unreliable) and low covariance when moving
-    # (heading derived from velocity vector).  This gives the EKF an
-    # absolute heading reference that corrects gyro drift over time.
-    imu1: /navheading
-    imu1_config: [false, false, false,
-                  false, false, true,
-                  false, false, false,
-                  false, false, false,
-                  false, false, false]
-    imu1_queue_size: 5
-    imu1_nodelay: false
-    imu1_differential: false
-    imu1_relative: false
-    imu1_remove_gravitational_acceleration: false
+    # NOTE: GPS heading (/navheading) removed from odom EKF.
+    # Single-antenna F9P heading is only valid when moving (derived from
+    # velocity vector). When stationary, the covariance is 1000 but the
+    # EKF still slowly drags orientation toward the random value.
+    # Heading comes from: IMU gyro (bias-compensated) + SLAM map matching.
 
     # Process noise tuning — HIGH values for velocity states (vx=6, vy=7)
     # because wheel ticks drift on real terrain.  Position states (x=0, y=1)

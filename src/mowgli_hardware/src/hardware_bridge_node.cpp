@@ -399,7 +399,7 @@ private:
     if (wheels_stationary_)
     {
       // Update bias estimate (low-pass filter, alpha ~0.01 = slow adaptation)
-      constexpr double kAlpha = 0.01;
+      constexpr double kAlpha = 0.05;
       gyro_bias_x_ += kAlpha * (raw_gx - gyro_bias_x_);
       gyro_bias_y_ += kAlpha * (raw_gy - gyro_bias_y_);
       gyro_bias_z_ += kAlpha * (raw_gz - gyro_bias_z_);
