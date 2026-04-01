@@ -1,4 +1,4 @@
-import {App, Button, Col, Modal, Row} from "antd";
+import {App, Button, Col, Row, Typography} from "antd";
 import {useEffect, useMemo, useRef, useState} from "react";
 import {fetchEventSource} from "@microsoft/fetch-event-source";
 import {createSchemaField} from "@formily/react";
@@ -64,11 +64,9 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
         effects: (form) => {
             onFieldValueChange('boardType', (field) => {
                 form.setFieldState('*(panelType,tickPerM,wheelBase,branch,repository,debugType,disableEmergency,maxMps,maxChargeCurrent,limitVoltage150MA,maxChargeVoltage,batChargeCutoffVoltage,oneWheelLiftEmergencyMillis,bothWheelsLiftEmergencyMillis,tiltEmergencyMillis,stopButtonEmergencyMillis,playButtonClearEmergencyMillis,imuOnboardInclinationThreshold,externalImuAcceleration,externalImuAngular,masterJ18,perimeterWire)', (state) => {
-                    //For the initial linkage, if the field cannot be found, setFieldState will push the update into the update queue until the field appears before performing the operation
                     state.display = field.value !== "BOARD_VERMUT_YARDFORCE500" ? "visible" : "hidden";
                 })
                 form.setFieldState('*(version,file)', (state) => {
-                    //For the initial linkage, if the field cannot be found, setFieldState will push the update into the update queue until the field appears before performing the operation
                     state.display = field.value === "BOARD_VERMUT_YARDFORCE500" ? "visible" : "hidden";
                 })
             })
@@ -79,6 +77,10 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
     const [data, setData] = useState<string[]>()
     const abortControllerRef = useRef<AbortController | null>(null);
     const [isFlashing, setIsFlashing] = useState(false);
+    const [flashDone, setFlashDone] = useState(false);
+    const [flashError, setFlashError] = useState<string | null>(null);
+    const terminalRef = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
         (async () => {
             try {
@@ -89,12 +91,6 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                 if (jsonConfig) {
                     form.setInitialValues(JSON.parse(jsonConfig))
                 }
-                if (config.error) {
-                    throw new Error(config.error.error)
-                }
-                console.log({
-                    message: "Retrieved config",
-                });
             } catch (e: any) {
                 notification.error({
                     message: "Error retrieving config",
@@ -108,6 +104,14 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
             }
         };
     }, []);
+
+    // Auto-scroll terminal to bottom
+    useEffect(() => {
+        if (terminalRef.current) {
+            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+        }
+    }, [data]);
+
     const doFlashFirmware = async (values: Config) => {
         if (isFlashing) return;
         if (abortControllerRef.current) {
@@ -116,11 +120,10 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
         setIsFlashing(true);
-        form.setLoading(true)
+        setFlashDone(false);
+        setFlashError(null);
+        setData([]);
         try {
-            console.log({
-                message: "Flashing firmware",
-            });
             await fetchEventSource(`/api/setup/flashBoard`, {
                 method: "POST",
                 keepalive: false,
@@ -130,71 +133,41 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                 },
                 signal: controller.signal,
                 onopen(res) {
-                    if (res.ok && res.status === 200) {
-                        console.log({
-                            message: "Connected to log stream",
-                        });
-                    } else if (
-                        res.status >= 400 &&
-                        res.status < 500 &&
-                        res.status !== 429
-                    ) {
+                    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
                         notification.error({
-                            message: "Error retrieving log stream",
+                            message: "Error connecting to flash endpoint",
                             description: res.statusText,
                         });
                     }
-                    setData([])
                     return Promise.resolve()
                 },
                 onmessage(event) {
                     if (event.event == "end") {
-                        notification.success({
-                            message: "Firmware flashed",
-                        });
-                        setTimeout(() => {
-                            props.onNext();
-                        }, 10000);
                         setIsFlashing(false);
-                        form.setLoading(false)
+                        setFlashDone(true);
                         return;
                     } else if (event.event == "error") {
-                        notification.error({
-                            message: "Error flashing firmware",
-                            description: event.data,
-                        });
                         setIsFlashing(false);
-                        form.setLoading(false)
+                        setFlashError(event.data);
                         return;
                     } else {
                         setData((data) => [...(data ?? []), event.data]);
                     }
                 },
-                onclose() {
-                    notification.success({
-                        message: "Logs stream closed",
-                    });
-                },
+                onclose() {},
                 onerror(err) {
-                    notification.error({
-                        message: "Error retrieving log stream",
-                        description: err.toString(),
-                    });
                     setIsFlashing(false);
-                    form.setLoading(false)
+                    setFlashError(err.toString());
                 },
             });
         } catch (e: any) {
             if (e.name !== 'AbortError') {
-                notification.error({
-                    message: "Error flashing firmware",
-                    description: e.toString(),
-                });
+                setIsFlashing(false);
+                setFlashError(e.toString());
             }
-            setIsFlashing(false);
-            form.setLoading(false)
         }
     };
+
     const flashFirmware = (values: Config) => {
         modal.confirm({
             title: "Confirm firmware flash",
@@ -217,6 +190,68 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
             onOk: () => doFlashFirmware(values),
         });
     };
+
+    // Show flashing progress view
+    if (data !== undefined && data.length > 0 || isFlashing || flashDone || flashError) {
+        return (
+            <Row gutter={[0, 16]}>
+                <Col span={24}>
+                    <Typography.Title level={5} style={{margin: 0}}>
+                        {isFlashing ? "Flashing firmware..." : flashError ? "Flash failed" : "Flash complete"}
+                    </Typography.Title>
+                </Col>
+                <Col span={24}>
+                    <div ref={terminalRef} style={{height: isMobile ? "50vh" : "55vh", overflowY: "auto"}}>
+                        <StyledTerminal>
+                            <Terminal colorMode={ColorMode.Dark}>
+                                {(data ?? []).map((line, index) => (
+                                    <TerminalOutput key={index}>{line}</TerminalOutput>
+                                ))}
+                                {flashDone && (
+                                    <TerminalOutput>
+                                        {"\n✅ Firmware flashed successfully!"}
+                                    </TerminalOutput>
+                                )}
+                                {flashError && (
+                                    <TerminalOutput>
+                                        {`\n❌ Error: ${flashError}`}
+                                    </TerminalOutput>
+                                )}
+                            </Terminal>
+                        </StyledTerminal>
+                    </div>
+                </Col>
+                <Col span={24} style={{
+                    position: "fixed",
+                    bottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 20,
+                    left: isMobile ? 0 : undefined,
+                    right: isMobile ? 0 : undefined,
+                    padding: isMobile ? '8px 12px' : undefined,
+                    background: isMobile ? colors.bgCard : undefined,
+                    borderTop: isMobile ? `1px solid ${colors.border}` : undefined,
+                    zIndex: 50,
+                }}>
+                    <FormButtonGroup>
+                        {flashError && (
+                            <Button onClick={() => {
+                                setData(undefined);
+                                setFlashError(null);
+                            }}>Back to config</Button>
+                        )}
+                        <Button
+                            type="primary"
+                            disabled={isFlashing}
+                            onClick={props.onNext}
+                        >
+                            {isFlashing ? "Flashing..." : "Next"}
+                        </Button>
+                    </FormButtonGroup>
+                </Col>
+            </Row>
+        );
+    }
+
+    // Show config form
     return <Form form={form}>
         <Row>
             <Col span={24} style={{height: isMobile ? "auto" : "55vh", overflowY: isMobile ? undefined : "auto", paddingBottom: isMobile ? 80 : undefined}}>
@@ -308,228 +343,91 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                         title={"Panel Selection"}
                         default={"PANEL_TYPE_YARDFORCE_500_CLASSIC"}
                         enum={[
-                            {
-                                label: "YardForce 500 Classic",
-                                value: "PANEL_TYPE_YARDFORCE_500_CLASSIC"
-                            },
-                            {
-                                label: "YardForce LUV1000RI",
-                                value: "PANEL_TYPE_YARDFORCE_LUV1000RI"
-                            },
-                            {
-                                label: "YardForce 500B Classic",
-                                value: "PANEL_TYPE_YARDFORCE_500B_CLASSIC"
-                            },
-                            {
-                                label: "YardForce 900 ECO",
-                                value: "PANEL_TYPE_YARDFORCE_900_ECO"
-                            }
+                            {label: "YardForce 500 Classic", value: "PANEL_TYPE_YARDFORCE_500_CLASSIC"},
+                            {label: "YardForce LUV1000RI", value: "PANEL_TYPE_YARDFORCE_LUV1000RI"},
+                            {label: "YardForce 500B Classic", value: "PANEL_TYPE_YARDFORCE_500B_CLASSIC"},
+                            {label: "YardForce 900 ECO", value: "PANEL_TYPE_YARDFORCE_900_ECO"},
                         ]} x-component="Select"
                         x-decorator="FormItem"/></SchemaField>
-
                     <SchemaField><SchemaField.String
                         name={"debugType"}
                         title={"Debug Type"}
                         default={"DEBUG_TYPE_UART"}
                         enum={[
-                            {
-                                label: "None",
-                                value: "DEBUG_TYPE_NONE"
-                            },
-                            {
-                                label: "Uart",
-                                value: "DEBUG_TYPE_UART"
-                            },
-                            {
-                                label: "Swo",
-                                value: "DEBUG_TYPE_SWO"
-                            }
+                            {label: "None", value: "DEBUG_TYPE_NONE"},
+                            {label: "Uart", value: "DEBUG_TYPE_UART"},
+                            {label: "Swo", value: "DEBUG_TYPE_SWO"},
                         ]} x-component="Select"
                         x-decorator="FormItem"/></SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"maxMps"}
-                            title={"Max MPS"}
-                            default={0.5}
-                            x-decorator-props={{tooltip: "Max speed in meters per second"}}
-                            x-component-props={{step: 0.1, max: 1.0}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"tickPerM"}
-                            title={"Tick per meter"}
-                            default={300.0}
-                            x-decorator-props={{tooltip: "Number of wheel ticks per meter"}}
-                            x-component-props={{step: 0.1}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"wheelBase"}
-                            title={"Wheel base"}
-                            default={0.325}
-                            x-decorator-props={{tooltip: "Wheel base in meters"}}
-                            x-component-props={{step: 0.001}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Boolean
-                            name={"disableEmergency"}
-                            title={"Disable Emergency"}
-                            default={false}
-                            x-decorator-props={{tooltip: "Disable emergency stop"}}
-                            x-component="Checkbox"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"maxChargeCurrent"}
-                        title={"Max Charge Current"}
-                        default={1.0}
+                    <SchemaField><SchemaField.Number name={"maxMps"} title={"Max MPS"} default={0.5}
+                        x-decorator-props={{tooltip: "Max speed in meters per second"}}
+                        x-component-props={{step: 0.1, max: 1.0}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"tickPerM"} title={"Tick per meter"} default={300.0}
+                        x-decorator-props={{tooltip: "Number of wheel ticks per meter"}}
+                        x-component-props={{step: 0.1}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"wheelBase"} title={"Wheel base"} default={0.325}
+                        x-decorator-props={{tooltip: "Wheel base in meters"}}
+                        x-component-props={{step: 0.001}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Boolean name={"disableEmergency"} title={"Disable Emergency"} default={false}
+                        x-decorator-props={{tooltip: "Disable emergency stop"}}
+                        x-component="Checkbox" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"maxChargeCurrent"} title={"Max Charge Current"} default={1.0}
                         x-component-props={{step: 0.1, max: 5.0}}
                         x-decorator-props={{tooltip: "Max charge current in Amps"}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"limitVoltage150MA"}
-                        title={"Limit Voltage 150mA"}
-                        default={28.0}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"limitVoltage150MA"} title={"Limit Voltage 150mA"} default={28.0}
                         x-decorator-props={{tooltip: "Voltage limit during slow charge in Volts"}}
                         x-component-props={{step: 0.1, max: 30.0}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"maxChargeVoltage"}
-                        title={"Max Charge Voltage"}
-                        default={29.0}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"maxChargeVoltage"} title={"Max Charge Voltage"} default={29.0}
                         x-decorator-props={{tooltip: "Max charge voltage in Volts"}}
                         x-component-props={{step: 0.1, max: 30.0}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"batChargeCutoffVoltage"}
-                        title={"Bat Charge Cutoff Voltage"}
-                        default={28.0}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"batChargeCutoffVoltage"} title={"Bat Charge Cutoff Voltage"} default={28.0}
                         x-decorator-props={{tooltip: "Max battery voltage allowed in Volts"}}
                         x-component-props={{step: 0.1, max: 30.0}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"oneWheelLiftEmergencyMillis"}
-                        title={"One Wheel Lift Emergency Millis"}
-                        default={10000}
-                        x-decorator-props={{tooltip: "Time in milliseconds before emergency stop when one wheel is lifted"}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"oneWheelLiftEmergencyMillis"} title={"One Wheel Lift Emergency Millis"} default={10000}
+                        x-decorator-props={{tooltip: "Time in ms before emergency when one wheel is lifted"}}
                         x-component-props={{step: 1}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField><SchemaField.Number
-                        name={"bothWheelsLiftEmergencyMillis"}
-                        title={"Both Wheel Lift Emergency Millis"}
-                        default={1000}
-                        x-decorator-props={{tooltip: "Time in milliseconds before emergency stop when both wheels are lifted"}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"bothWheelsLiftEmergencyMillis"} title={"Both Wheel Lift Emergency Millis"} default={1000}
+                        x-decorator-props={{tooltip: "Time in ms before emergency when both wheels are lifted"}}
                         x-component-props={{step: 1}}
-                        x-component="NumberPicker"
-                        x-decorator="FormItem"/></SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"tiltEmergencyMillis"}
-                            title={"Tilt Emergency Millis"}
-                            default={500}
-                            x-decorator-props={{tooltip: "Time in milliseconds before emergency stop when mower is tilted"}}
-                            x-component-props={{step: 1}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"stopButtonEmergencyMillis"}
-                            title={"Stop Button Emergency Millis"}
-                            default={100}
-                            x-decorator-props={{tooltip: "Time in milliseconds before emergency stop when stop button is pressed"}}
-                            x-component-props={{step: 1}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"playButtonClearEmergencyMillis"}
-                            title={"Play Button Clear Emergency Millis"}
-                            default={2000}
-                            x-decorator-props={{tooltip: "Time in milliseconds before emergency stop is cleared when play button is pressed"}}
-                            x-component-props={{step: 1}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Number
-                            name={"imuOnboardInclinationThreshold"}
-                            title={"IMU Onboard Inclination Threshold"}
-                            default={0x38}
-                            x-decorator-props={{tooltip: "IMU onboard inclination threshold (0x2C=more inclination allowed, 0x38=stock). Value in hex."}}
-                            x-component-props={{step: 1, min: 0, max: 127}}
-                            x-component="NumberPicker"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Boolean
-                            name={"externalImuAcceleration"}
-                            title={"External IMU Acceleration"}
-                            default={true}
-                            x-decorator-props={{tooltip: "Use external IMU for acceleration"}}
-                            x-component="Checkbox"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Boolean
-                            name={"externalImuAngular"}
-                            title={"External IMU Angular"}
-                            default={true}
-                            x-decorator-props={{tooltip: "Use external IMU for angular"}}
-                            x-component="Checkbox"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Boolean
-                            name={"masterJ18"}
-                            title={"Master J18"}
-                            default={true}
-                            x-decorator-props={{tooltip: "Use J18 as master"}}
-                            x-component="Checkbox"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
-                    <SchemaField>
-                        <SchemaField.Boolean
-                            name={"perimeterWire"}
-                            title={"Use Perimeter wire"}
-                            default={true}
-                            x-decorator-props={{tooltip: "Use perimeter wire"}}
-                            x-component="Checkbox"
-                            x-decorator="FormItem"/>
-                    </SchemaField>
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"tiltEmergencyMillis"} title={"Tilt Emergency Millis"} default={500}
+                        x-decorator-props={{tooltip: "Time in ms before emergency when mower is tilted"}}
+                        x-component-props={{step: 1}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"stopButtonEmergencyMillis"} title={"Stop Button Emergency Millis"} default={100}
+                        x-decorator-props={{tooltip: "Time in ms before emergency when stop button is pressed"}}
+                        x-component-props={{step: 1}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"playButtonClearEmergencyMillis"} title={"Play Button Clear Emergency Millis"} default={2000}
+                        x-decorator-props={{tooltip: "Time in ms to hold play button to clear emergency"}}
+                        x-component-props={{step: 1}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Number name={"imuOnboardInclinationThreshold"} title={"IMU Onboard Inclination Threshold"} default={0x38}
+                        x-decorator-props={{tooltip: "IMU inclination threshold (0x2C=more allowed, 0x38=stock)"}}
+                        x-component-props={{step: 1, min: 0, max: 127}}
+                        x-component="NumberPicker" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Boolean name={"externalImuAcceleration"} title={"External IMU Acceleration"} default={true}
+                        x-decorator-props={{tooltip: "Use external IMU for acceleration"}}
+                        x-component="Checkbox" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Boolean name={"externalImuAngular"} title={"External IMU Angular"} default={true}
+                        x-decorator-props={{tooltip: "Use external IMU for angular"}}
+                        x-component="Checkbox" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Boolean name={"masterJ18"} title={"Master J18"} default={true}
+                        x-decorator-props={{tooltip: "Use J18 as master"}}
+                        x-component="Checkbox" x-decorator="FormItem"/></SchemaField>
+                    <SchemaField><SchemaField.Boolean name={"perimeterWire"} title={"Use Perimeter wire"} default={true}
+                        x-decorator-props={{tooltip: "Use perimeter wire"}}
+                        x-component="Checkbox" x-decorator="FormItem"/></SchemaField>
                 </FormLayout>
             </Col>
-            <Modal
-                title="Firmware logs"
-                width={"70%"}
-                open={(data && data.length > 0)}
-                cancelButtonProps={{style: {display: "none"}}}
-                okButtonProps={{disabled: isFlashing}}
-                onOk={() => {
-                    setData([])
-                }}
-                zIndex={1100}
-            >
-                <StyledTerminal>
-                    <Terminal colorMode={ColorMode.Dark}>
-                        {(data ?? []).map((line, index) => {
-                            return <TerminalOutput key={index}>{line}</TerminalOutput>;
-                        })}
-                    </Terminal>
-                </StyledTerminal>
-            </Modal>
             <Col span={24} style={{
                 position: "fixed",
                 bottom: isMobile ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 20,
@@ -541,7 +439,7 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                 zIndex: 50,
             }}>
                 <FormButtonGroup>
-                    <Button type="primary" loading={isFlashing} onClick={() => {
+                    <Button type="primary" onClick={() => {
                         form.submit(flashFirmware).catch((err: unknown) => {
                             if (err instanceof Error) {
                                 notification.error({
@@ -553,6 +451,7 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                     }}>Flash Firmware</Button>
                     <Button onClick={props.onNext}>Skip</Button>
                 </FormButtonGroup>
-            </Col> </Row>
+            </Col>
+        </Row>
     </Form>;
 };
