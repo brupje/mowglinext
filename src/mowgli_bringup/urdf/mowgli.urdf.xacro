@@ -27,6 +27,11 @@
   <xacro:arg name="lidar_z"   default="0.22"/>
   <xacro:arg name="lidar_yaw" default="0.0"/>
 
+  <xacro:arg name="imu_x"     default="0.0"/>
+  <xacro:arg name="imu_y"     default="0.0"/>
+  <xacro:arg name="imu_z"     default="0.095"/>
+  <xacro:arg name="imu_yaw"   default="0.0"/>
+
   <!-- ================================================================
        Properties
        ================================================================ -->
@@ -295,7 +300,7 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="imu_link"/>
-    <origin xyz="0 0 ${base_height/2}" rpy="0 0 0"/>
+    <origin xyz="$(arg imu_x) $(arg imu_y) $(arg imu_z)" rpy="0 0 $(arg imu_yaw)"/>
   </joint>
 
   <!-- ================================================================

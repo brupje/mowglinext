@@ -78,6 +78,12 @@ def generate_launch_description() -> LaunchDescription:
     lidar_z   = str(robot_params.get("lidar_z", "0.22"))
     lidar_yaw = str(robot_params.get("lidar_yaw", "0.0"))
 
+    # IMU position / orientation from robot config (with defaults)
+    imu_x   = str(robot_params.get("imu_x", "0.0"))
+    imu_y   = str(robot_params.get("imu_y", "0.0"))
+    imu_z   = str(robot_params.get("imu_z", "0.095"))
+    imu_yaw = str(robot_params.get("imu_yaw", "0.0"))
+
     robot_description_content = Command(
         [
             FindExecutable(name="xacro"),
@@ -87,6 +93,10 @@ def generate_launch_description() -> LaunchDescription:
             " lidar_y:=", lidar_y,
             " lidar_z:=", lidar_z,
             " lidar_yaw:=", lidar_yaw,
+            " imu_x:=", imu_x,
+            " imu_y:=", imu_y,
+            " imu_z:=", imu_z,
+            " imu_yaw:=", imu_yaw,
         ]
     )
 
