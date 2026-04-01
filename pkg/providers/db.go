@@ -23,9 +23,10 @@ var EnvFallbacks = map[string]string{
 	"system.mqtt.host":        "MQTT_HOST",
 	"system.mower.configFile":     "MOWER_CONFIG_FILE",
 	"system.mower.yamlConfigFile": "MOWER_YAML_CONFIG_FILE",
-	"system.ros.masterUri":    "ROS_MASTER_URI",
-	"system.ros.nodeName":     "ROS_NODE_NAME",
-	"system.ros.nodeHost":     "ROS_NODE_HOST",
+	"system.ros.masterUri":     "ROS_MASTER_URI",
+	"system.ros.nodeName":      "ROS_NODE_NAME",
+	"system.ros.nodeHost":      "ROS_NODE_HOST",
+	"system.ros.rosbridgeUrl":  "ROSBRIDGE_URL",
 	"system.homekit.pincode":  "HOMEKIT_PINCODE",
 }
 var Defaults = map[string]string{

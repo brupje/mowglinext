@@ -30,19 +30,19 @@ type topicDef struct {
 // Virtual topics (map, mowingPath) have an empty MsgType and are never sent to
 // rosbridge; they are populated by internal logic instead.
 var topicMap = map[string]topicDef{
-	"status":        {"/hardware_bridge/status", "mowgli_interfaces/msg/Status"},
+	"status":        {"/status", "mowgli_interfaces/msg/Status"},
 	"highLevelStatus": {"/behavior_tree_node/high_level_status", "mowgli_interfaces/msg/HighLevelStatus"},
-	"gps":           {"/gps/fix", "sensor_msgs/msg/NavSatFix"},
-	"pose":          {"/odom", "nav_msgs/msg/Odometry"},
-	"imu":           {"/hardware_bridge/imu/data_raw", "sensor_msgs/msg/Imu"},
-	"ticks":         {"/hardware_bridge/wheel_odom", "nav_msgs/msg/Odometry"},
+	"gps":           {"/gps/absolute_pose", "mowgli_interfaces/msg/AbsolutePose"},
+	"pose":          {"/odometry/filtered_map", "nav_msgs/msg/Odometry"},
+	"imu":           {"/imu/data", "sensor_msgs/msg/Imu"},
+	"ticks":         {"/wheel_odom", "nav_msgs/msg/Odometry"},
 	"map":           {"", ""},                                                      // virtual – populated via map_server services
 	"path":          {"/coverage_planner_node/coverage_path", "nav_msgs/msg/Path"},
 	"plan":          {"/plan", "nav_msgs/msg/Path"},                                // Nav2 global plan
 	"mowingPath":    {"", ""},                                                      // virtual – populated by initMowingPathTracking
-	"power":         {"/hardware_bridge/power", "mowgli_interfaces/msg/Power"},
-	"emergency":     {"/hardware_bridge/emergency", "mowgli_interfaces/msg/Emergency"},
-	"dockingSensor": {"/mower/docking_sensor", "mowgli_interfaces/msg/DockingSensor"},
+	"power":         {"/power", "mowgli_interfaces/msg/Power"},
+	"emergency":     {"/emergency", "mowgli_interfaces/msg/Emergency"},
+	// NOTE: DockingSensor.msg does not exist in mowgli_interfaces yet; omitted to avoid rosbridge errors.
 	"lidar":         {"/scan", "sensor_msgs/msg/LaserScan"},
 	"diagnostics":   {"/diagnostics", "diagnostic_msgs/msg/DiagnosticArray"},
 }
@@ -172,7 +172,6 @@ func NewRosProvider(dbProvider types2.IDBProvider) types2.IRosProvider {
 // topics receive a generic snake_case → PascalCase key rename.
 func (r *RosProvider) initRosbridgeSubscriptions() {
 	adapters := map[string]func([]byte) ([]byte, error){
-		"gps":   adaptGPS,
 		"pose":  adaptPose,
 		"ticks": adaptTicks,
 	}

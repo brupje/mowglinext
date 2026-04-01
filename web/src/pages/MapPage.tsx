@@ -70,8 +70,8 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
     // Extracted hooks
     const {offsetX, offsetY, handleOffsetX, handleOffsetY} = useMapOffset({config, setConfig, notification});
 
-    const _datumLon = parseFloat(settings["OM_DATUM_LONG"] ?? 0)
-    const _datumLat = parseFloat(settings["OM_DATUM_LAT"] ?? 0)
+    const _datumLon = parseFloat(settings["datum_lon"] ?? 0)
+    const _datumLat = parseFloat(settings["datum_lat"] ?? 0)
 
     // Compute datum (UTM origin) from settings — does not depend on map data
     const datum = useMemo<[number, number, number]>(() => {
@@ -111,7 +111,7 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
         return {type: "FeatureCollection", features: feats};
     }, [features, offsetX, offsetY, datum]);
 
-    const mowingToolWidth = parseFloat(settings["OM_TOOL_WIDTH"] ?? "0.13") * 100;
+    const mowingToolWidth = parseFloat(settings["tool_width"] ?? "0.18") * 100;
     const [mowingAreas, setMowingAreas] = useState<{ key: string, label: string, feat: Feature }[]>([])
 
     const {map, setMap, path, plan, lidarCollection, highLevelStatus, joyStream} = useMapStreams({

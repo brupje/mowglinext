@@ -187,11 +187,11 @@ export const useSettings = () => {
         (async () => {
             try {
                 setLoading(true)
+                // Load shell config settings
                 const settingsList = await guiApi.settings.settingsList()
                 if (settingsList.error) {
                     throw new Error(settingsList.error.error)
                 }
-                setLoading(false)
                 const fetchedSettings = settingsList.data.settings ?? {};
                 const newSettings: Record<string, any> = {}
                 Object.keys(fetchedSettings).forEach((key) => {
@@ -205,9 +205,19 @@ export const useSettings = () => {
                         newSettings[key] = fetchedSettings[key]
                     }
                 })
+                // Load YAML config settings (new snake_case keys)
+                try {
+                    const yamlSettings = await guiApi.settings.settingsYamlList()
+                    if (!yamlSettings.error && yamlSettings.data) {
+                        Object.assign(newSettings, yamlSettings.data)
+                    }
+                } catch {
+                    // YAML endpoint may not exist on older backends
+                }
                 setSettings((prev) => {
                     return {...prev, ...newSettings}
                 })
+                setLoading(false)
             } catch (e: any) {
                 notification.error({
                     message: "Failed to load settings",

@@ -8,8 +8,8 @@ export const MiniMap: React.FC<{height?: number}> = ({height = 180}) => {
     const navigate = useNavigate();
     const {settings} = useSettings();
 
-    const datumLon = parseFloat(settings["OM_DATUM_LONG"] ?? "0");
-    const datumLat = parseFloat(settings["OM_DATUM_LAT"] ?? "0");
+    const datumLon = parseFloat(settings["datum_lon"] ?? "0");
+    const datumLat = parseFloat(settings["datum_lat"] ?? "0");
     const hasDatum = !!(datumLon && datumLat) && isFinite(datumLon) && isFinite(datumLat);
 
     if (!hasDatum) {

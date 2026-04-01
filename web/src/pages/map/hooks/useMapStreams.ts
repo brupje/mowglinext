@@ -256,8 +256,8 @@ export function useMapStreams({
             setLidarCollection({ type: "FeatureCollection", features: [] });
         } else {
             if (
-                settings["OM_DATUM_LONG"] == undefined ||
-                settings["OM_DATUM_LAT"] == undefined
+                settings["datum_lon"] == undefined ||
+                settings["datum_lat"] == undefined
             ) {
                 return;
             }
@@ -284,8 +284,8 @@ export function useMapStreams({
     // Restart all streams on settings change
     useEffect(() => {
         if (
-            settings["OM_DATUM_LONG"] == undefined ||
-            settings["OM_DATUM_LAT"] == undefined
+            settings["datum_lon"] == undefined ||
+            settings["datum_lat"] == undefined
         ) {
             return;
         }

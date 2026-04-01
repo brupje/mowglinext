@@ -65,6 +65,7 @@ type Client struct {
 	// subMu is a RWMutex: the readPump dispatch path acquires a read lock,
 	// while Subscribe/Unsubscribe acquire the write lock.
 	subscribers map[string][]subscriberEntry
+	topicTypes  map[string]string // topic -> msgType for resubscribe
 	subMu       sync.RWMutex
 
 	// pendingSvc maps a unique call ID to the channel that CallService is
@@ -99,6 +100,7 @@ func NewClient(url string) *Client {
 	return &Client{
 		url:            url,
 		subscribers:    make(map[string][]subscriberEntry),
+		topicTypes:     make(map[string]string),
 		pendingSvc:     make(map[string]chan serviceResponse),
 		advertised:     make(map[string]bool),
 		done:           make(chan struct{}),
@@ -207,6 +209,11 @@ func (c *Client) Subscribe(topic, msgType, id string, cb func(json.RawMessage)) 
 
 	c.subscribers[topic] = append(entries, subscriberEntry{id: id, callback: cb})
 
+	// Remember the message type so resubscribeAll can use it after reconnect.
+	if msgType != "" {
+		c.topicTypes[topic] = msgType
+	}
+
 	// Only send one subscribe message to rosbridge per topic.
 	if firstSubscriber {
 		return c.sendSubscribe(topic, msgType)
@@ -223,6 +230,7 @@ func (c *Client) sendSubscribe(topic, msgType string) error {
 		"id":            c.nextID(),
 		"topic":         topic,
 		"type":          msgType,
+		"compression":   "none",
 		"throttle_rate": 0,
 	}
 	return c.writeJSON(msg)
@@ -597,14 +605,13 @@ func (c *Client) resubscribeAll() {
 		if len(entries) == 0 {
 			continue
 		}
-		// We don't have the msgType stored; send an empty type string and let
-		// rosbridge infer it from the live topic. Callers that need a specific
-		// type should re-subscribe explicitly after a reconnect notification.
+		msgType := c.topicTypes[topic] // may be "" if never stored
 		msg := map[string]interface{}{
 			"op":            "subscribe",
 			"id":            c.nextID(),
 			"topic":         topic,
-			"type":          "",
+			"type":          msgType,
+			"compression":   "none",
 			"throttle_rate": 0,
 		}
 		if err := c.writeJSON(msg); err != nil {

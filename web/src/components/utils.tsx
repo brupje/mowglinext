@@ -20,6 +20,10 @@ export const stateRenderer = (value: string | undefined) => {
             return "Undocking"
         case "AREA_RECORDING":
             return "Area Recording"
+        case "CHARGING":
+            return "Charging"
+        case "EMERGENCY":
+            return "Emergency"
         default:
             return value ?? "Offline"
     }

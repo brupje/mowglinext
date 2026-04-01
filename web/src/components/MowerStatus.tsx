@@ -1,4 +1,10 @@
 import {useHighLevelStatus} from "../hooks/useHighLevelStatus.ts";
+import {useStatus} from "../hooks/useStatus.ts";
+import {useEmergency} from "../hooks/useEmergency.ts";
+import {usePower} from "../hooks/usePower.ts";
+import {useGPS} from "../hooks/useGPS.ts";
+import {useSettings} from "../hooks/useSettings.ts";
+import {AbsolutePoseFlags} from "../types/ros.ts";
 import {App, Badge, Dropdown, Modal, Space, Typography} from "antd";
 import {PoweroffOutlined, ReloadOutlined, DesktopOutlined, WifiOutlined} from "@ant-design/icons"
 import {stateRenderer} from "./utils.tsx";
@@ -24,6 +30,7 @@ const statusColor = (state: string | undefined, colors: {primary: string; warnin
         case "UNDOCKING":
             return colors.primary;
         case "IDLE":
+        case "CHARGING":
             return colors.warning;
         default:
             return colors.danger;
@@ -33,13 +40,54 @@ const statusColor = (state: string | undefined, colors: {primary: string; warnin
 export const MowerStatus = () => {
     const {colors} = useThemeMode();
     const {highLevelStatus} = useHighLevelStatus();
+    const hwStatus = useStatus();
+    const emergencyData = useEmergency();
+    const power = usePower();
+    const gps = useGPS();
+    const {settings} = useSettings();
     const guiApi = useApi();
     const {notification} = App.useApp();
-    const gpsPercent = Math.round((highLevelStatus.GpsQualityPercent ?? 0) * 100);
-    const batteryPercent = Math.round((highLevelStatus.BatteryPercent ?? 0) * 100);
 
-    const isMowing = highLevelStatus.StateName === "MOWING" || highLevelStatus.StateName === "DOCKING" || highLevelStatus.StateName === "UNDOCKING";
-    const isEmergency = !!highLevelStatus.Emergency;
+    // Derive state with fallbacks
+    const isEmergency = highLevelStatus.Emergency ?? emergencyData.ActiveEmergency ?? false;
+    const isCharging = highLevelStatus.IsCharging ?? hwStatus.IsCharging ?? false;
+
+    const stateName = highLevelStatus.StateName ?? (
+        isEmergency ? "EMERGENCY" :
+        isCharging ? "CHARGING" :
+        hwStatus.MowerStatus != null ? "IDLE" :
+        undefined
+    );
+
+    // GPS quality with fallback
+    const gpsPercent = (() => {
+        if (highLevelStatus.GpsQualityPercent != null && highLevelStatus.GpsQualityPercent > 0) {
+            return Math.round(highLevelStatus.GpsQualityPercent * 100);
+        }
+        if (gps.Flags != null) {
+            if (gps.Flags & AbsolutePoseFlags.FIXED) return 100;
+            if (gps.Flags & AbsolutePoseFlags.FLOAT) return 50;
+            if (gps.Flags & AbsolutePoseFlags.RTK) return 25;
+        }
+        return 0;
+    })();
+
+    // Battery percent with fallback
+    const batteryPercent = (() => {
+        if (highLevelStatus.BatteryPercent != null && highLevelStatus.BatteryPercent > 0) {
+            return Math.round(highLevelStatus.BatteryPercent * 100);
+        }
+        if (power.VBattery) {
+            const full = parseFloat(settings["battery_full_voltage"] ?? "28.5");
+            const empty = parseFloat(settings["battery_empty_voltage"] ?? "23.0");
+            const pct = ((power.VBattery - empty) / (full - empty)) * 100;
+            return Math.round(Math.max(0, Math.min(100, pct)));
+        }
+        return 0;
+    })();
+
+    const isMowing = stateName === "MOWING" || stateName === "DOCKING" || stateName === "UNDOCKING";
+
     const pulseAnimation = isEmergency
         ? 'mowerPulseRed 1.5s ease-in-out infinite'
         : isMowing
@@ -129,11 +177,11 @@ export const MowerStatus = () => {
             <Space size="small" style={{flexShrink: 0}}>
                 <Space size={4}>
                     <Badge
-                        color={statusColor(highLevelStatus.StateName, colors)}
+                        color={statusColor(stateName, colors)}
                         style={{animation: pulseAnimation, borderRadius: '50%'}}
                     />
                     <Typography.Text style={{fontSize: 12, color: colors.text, whiteSpace: 'nowrap'}}>
-                        {stateRenderer(highLevelStatus.StateName)}
+                        {stateRenderer(stateName)}
                     </Typography.Text>
                 </Space>
                 {isMowing && hasArea && (
@@ -151,7 +199,7 @@ export const MowerStatus = () => {
                 <Dropdown menu={{items: powerMenuItems}} trigger={["click"]} placement="bottomRight">
                     <Space size={4} style={{cursor: "pointer"}}>
                         <PoweroffOutlined style={{
-                            color: highLevelStatus.IsCharging ? colors.primary : colors.muted,
+                            color: isCharging ? colors.primary : colors.muted,
                             fontSize: 13,
                         }}/>
                         <Typography.Text style={{fontSize: 12, color: colors.text}}>
