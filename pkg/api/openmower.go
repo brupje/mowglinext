@@ -124,6 +124,9 @@ func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 				}
 			}
 
+			// Persist areas to disk so they survive container restarts
+			_ = provider.CallService(c.Request.Context(), "/map_server_node/save_areas", &mowgli.ClearMapReq{}, &mowgli.ClearMapRes{})
+
 			c.JSON(200, OkResponse{})
 		}
 	})
