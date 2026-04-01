@@ -52,6 +52,9 @@ extern "C" {
 /** Wheel odometry packet (LlOdometry / pkt_odometry_t). */
 #define PKT_ID_ODOMETRY    0x04u
 
+/** Blade motor status packet (pkt_blade_status_t). */
+#define PKT_ID_BLADE_STATUS 0x05u
+
 /** High-level config response packet. */
 #define PKT_ID_CONFIG_RSP  0x12u
 
@@ -75,6 +78,9 @@ extern "C" {
 
 /** Velocity command packet (forward + angular velocity). */
 #define PKT_ID_CMD_VEL     0x50u
+
+/** Blade motor control packet (on/off + direction). */
+#define PKT_ID_CMD_BLADE   0x51u
 
 /* ---------------------------------------------------------------------------
  * status_bitmask bit definitions  (pkt_status_t::status_bitmask)
@@ -249,6 +255,37 @@ typedef struct {
     float    angular_z; /**< Yaw (angular) velocity [rad/s] */
     uint16_t crc;       /**< CRC-16 CCITT over preceding bytes */
 } pkt_cmd_vel_t;
+
+/**
+ * @brief Blade motor control packet — Host -> Firmware (PKT_ID_CMD_BLADE = 0x51).
+ *
+ * Commands the blade motor on/off and direction.
+ *
+ * Wire size: 5 bytes.
+ */
+typedef struct {
+    uint8_t  type;      /**< PKT_ID_CMD_BLADE */
+    uint8_t  blade_on;  /**< 1=start blade, 0=stop blade */
+    uint8_t  blade_dir; /**< 0=normal, 1=reverse */
+    uint16_t crc;       /**< CRC-16 CCITT over preceding bytes */
+} pkt_cmd_blade_t;
+
+/**
+ * @brief Blade motor status packet — Firmware -> Host (PKT_ID_BLADE_STATUS = 0x05).
+ *
+ * Sent periodically (~4 Hz) with blade motor telemetry.
+ *
+ * Wire size: 16 bytes.
+ */
+typedef struct {
+    uint8_t  type;           /**< PKT_ID_BLADE_STATUS */
+    uint8_t  is_active;      /**< 1=running, 0=stopped */
+    uint16_t rpm;            /**< Blade motor RPM */
+    uint16_t power_watts;    /**< Power consumption [W] */
+    float    temperature;    /**< Blade/motor temperature [C] */
+    uint32_t error_count;    /**< Cumulative error counter */
+    uint16_t crc;            /**< CRC-16 CCITT over preceding bytes */
+} pkt_blade_status_t;
 
 #pragma pack(pop)
 

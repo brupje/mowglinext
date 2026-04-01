@@ -57,6 +57,7 @@
 #define STATUS_NBT_TIME_MS 250
 #define PANEL_NBT_TIME_MS  100
 #define LED_NBT_TIME_MS    1000
+#define BLADE_NBT_TIME_MS  250
 
 /* ---------------------------------------------------------------------------
  * Drive motor control state
@@ -103,6 +104,7 @@ static nbt_t panel_nbt;
 static nbt_t imu_nbt;
 static nbt_t status_nbt;
 static nbt_t led_nbt;
+static nbt_t blade_nbt;
 
 /* ---------------------------------------------------------------------------
  * Odometry timing
@@ -212,7 +214,23 @@ static void on_hl_state(const uint8_t *data, size_t len)
         break;
     }
 
-    // Blade LED feedback
+    update_blade_led();
+}
+
+static void on_cmd_blade(const uint8_t *data, size_t len)
+{
+    if (len < sizeof(pkt_cmd_blade_t) - 2u) {
+        return;
+    }
+
+    const pkt_cmd_blade_t *pkt = (const pkt_cmd_blade_t *)data;
+    target_blade_on_off = pkt->blade_on;
+    blade_direction = pkt->blade_dir;
+}
+
+/* on_hl_state blade LED feedback (moved out of on_hl_state for clarity) */
+static void update_blade_led(void)
+{
     if (target_blade_on_off) {
         #ifdef PANEL_LED_2H
         if (BLADEMOTOR_bActivated) {
@@ -465,6 +483,18 @@ extern "C" void broadcast_handler()
 
         mowgli_comms_send_status(&status_pkt);
     }
+
+    // Blade motor status (4 Hz)
+    if (NBT_handler(&blade_nbt)) {
+        pkt_blade_status_t blade_pkt;
+        blade_pkt.type        = PKT_ID_BLADE_STATUS;
+        blade_pkt.is_active   = BLADEMOTOR_bActivated ? 1u : 0u;
+        blade_pkt.rpm         = BLADEMOTOR_u16RPM;
+        blade_pkt.power_watts = BLADEMOTOR_u16Power;
+        blade_pkt.temperature = blade_temperature;
+        blade_pkt.error_count = BLADEMOTOR_u32Error;
+        mowgli_comms_send(&blade_pkt, sizeof(blade_pkt));
+    }
 }
 
 /* ---------------------------------------------------------------------------
@@ -488,6 +518,7 @@ extern "C" void init_ROS()
     mowgli_comms_register_handler(PKT_ID_HEARTBEAT, on_heartbeat);
     mowgli_comms_register_handler(PKT_ID_CMD_VEL,   on_cmd_vel);
     mowgli_comms_register_handler(PKT_ID_HL_STATE,  on_hl_state);
+    mowgli_comms_register_handler(PKT_ID_CMD_BLADE, on_cmd_blade);
 
     // Initialise timers
     NBT_init(&led_nbt,     LED_NBT_TIME_MS);
@@ -495,6 +526,7 @@ extern "C" void init_ROS()
     NBT_init(&status_nbt,  STATUS_NBT_TIME_MS);
     NBT_init(&imu_nbt,     IMU_NBT_TIME_MS);
     NBT_init(&motors_nbt,  MOTORS_NBT_TIME_MS);
+    NBT_init(&blade_nbt,   BLADE_NBT_TIME_MS);
 
     last_odom_tick      = HAL_GetTick();
     last_heartbeat_tick = HAL_GetTick();
