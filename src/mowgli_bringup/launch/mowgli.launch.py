@@ -132,7 +132,7 @@ def generate_launch_description() -> LaunchDescription:
             ("~/emergency", "/emergency"),
             ("~/power", "/power"),
             ("~/status", "/status"),
-            ("~/cmd_vel", "/hardware_bridge/cmd_vel"),
+            ("~/cmd_vel", "/cmd_vel"),
         ],
     )
 
