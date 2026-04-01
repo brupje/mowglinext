@@ -51,6 +51,9 @@ func AddMapAreaRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 		if err != nil {
 			return
 		}
+		if CallReq.Area.Obstacles == nil {
+			CallReq.Area.Obstacles = []geometry.Polygon{}
+		}
 		err = provider.CallService(c.Request.Context(), "/map_server_node/add_area", &CallReq, &mowgli.AddMowingAreaRes{})
 		if err != nil {
 			c.JSON(500, ErrorResponse{Error: err.Error()})
@@ -105,6 +108,11 @@ func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 				return
 			}
 			for _, element := range CallReq.Areas {
+				// Ensure Obstacles is an empty slice, not nil — rosbridge
+				// rejects null for repeated fields ("msg is not a list type").
+				if element.Area.Obstacles == nil {
+					element.Area.Obstacles = []geometry.Polygon{}
+				}
 				areaReq := mowgli.AddMowingAreaReq{
 					Area:             element.Area,
 					IsNavigationArea: element.IsNavigationArea,
