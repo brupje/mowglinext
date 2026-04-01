@@ -123,6 +123,10 @@ def generate_launch_description() -> LaunchDescription:
             # Allow command-line override of the serial port.
             {"serial_port": serial_port},
             {"use_sim_time": use_sim_time},
+            # Pass dock pose from robot config for dock position anchoring
+            {"dock_pose_x": float(robot_params.get("dock_pose_x", 0.0))},
+            {"dock_pose_y": float(robot_params.get("dock_pose_y", 0.0))},
+            {"dock_pose_yaw": float(robot_params.get("dock_pose_yaw", 0.0))},
         ],
         # The node publishes on ~/topic (e.g. /hardware_bridge/wheel_odom)
         # but the EKF and other nodes expect unprefixed names.

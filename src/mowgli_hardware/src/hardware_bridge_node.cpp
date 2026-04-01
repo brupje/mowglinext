@@ -30,11 +30,13 @@
  */
 
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "mowgli_hardware/ll_datatypes.hpp"
 #include "mowgli_hardware/packet_handler.hpp"
@@ -83,6 +85,9 @@ private:
     heartbeat_rate_ = declare_parameter<double>("heartbeat_rate", 4.0);
     publish_rate_ = declare_parameter<double>("publish_rate", 100.0);
     high_level_rate_ = declare_parameter<double>("high_level_rate", 2.0);
+    dock_x_ = declare_parameter<double>("dock_pose_x", 0.0);
+    dock_y_ = declare_parameter<double>("dock_pose_y", 0.0);
+    dock_yaw_ = declare_parameter<double>("dock_pose_yaw", 0.0);
 
     RCLCPP_INFO(get_logger(),
                 "Parameters: serial_port=%s baud_rate=%d heartbeat_rate=%.1f Hz "
@@ -101,6 +106,7 @@ private:
     pub_power_ = create_publisher<mowgli_interfaces::msg::Power>("~/power", 10);
     pub_imu_ = create_publisher<sensor_msgs::msg::Imu>("~/imu/data_raw", 10);
     pub_wheel_odom_ = create_publisher<nav_msgs::msg::Odometry>("~/wheel_odom", 10);
+    pub_dock_pose_ = create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/dock_pose_fix", 10);
   }
 
   void create_subscribers()
@@ -330,6 +336,30 @@ private:
       msg.mower_motor_temperature = blade_temperature_;
       msg.mower_esc_current = blade_esc_current_;
       pub_status_->publish(msg);
+    }
+
+    // ---- Dock pose fix (when charging, anchor position + orientation) ----
+    // When on the dock, we know the exact position. If dock_yaw is
+    // configured (non-zero), also anchor orientation. This prevents
+    // position drift from GPS noise and gives the EKF a heading reference.
+    if (is_charging_ && (dock_x_ != 0.0 || dock_y_ != 0.0))
+    {
+      auto pose_msg = geometry_msgs::msg::PoseWithCovarianceStamped{};
+      pose_msg.header.stamp = stamp;
+      pose_msg.header.frame_id = "map";
+      pose_msg.pose.pose.position.x = dock_x_;
+      pose_msg.pose.pose.position.y = dock_y_;
+      pose_msg.pose.pose.orientation.z = std::sin(dock_yaw_ / 2.0);
+      pose_msg.pose.pose.orientation.w = std::cos(dock_yaw_ / 2.0);
+      // Very tight position covariance
+      pose_msg.pose.covariance[0] = 0.001;   // x
+      pose_msg.pose.covariance[7] = 0.001;   // y
+      pose_msg.pose.covariance[14] = 1e6;    // z
+      pose_msg.pose.covariance[21] = 1e6;    // roll
+      pose_msg.pose.covariance[28] = 1e6;    // pitch
+      // Yaw: tight if configured, loose if unknown (let SLAM determine it)
+      pose_msg.pose.covariance[35] = (dock_yaw_ != 0.0) ? 0.01 : 1e6;
+      pub_dock_pose_->publish(pose_msg);
     }
 
     // ---- Emergency message ----
@@ -642,6 +672,7 @@ private:
   rclcpp::Publisher<mowgli_interfaces::msg::Power>::SharedPtr pub_power_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_wheel_odom_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_dock_pose_;
 
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
   rclcpp::Subscription<mowgli_interfaces::msg::HighLevelStatus>::SharedPtr sub_hl_status_;
@@ -673,6 +704,9 @@ private:
   bool emergency_active_{false};
   bool emergency_release_pending_{false};
   int startup_release_count_{5};  // Send release for first 5 heartbeats
+  double dock_x_{0.0};
+  double dock_y_{0.0};
+  double dock_yaw_{0.0};
   bool mow_enabled_{false};
   bool is_charging_{false};
   uint8_t current_mode_{0};

@@ -139,6 +139,21 @@ ekf_map:
     pose0_differential: false
     pose0_relative: false
 
+    # Dock pose fix: when charging, the hardware bridge publishes the
+    # known dock position (and orientation if configured) with very tight
+    # covariance. This anchors the robot to the dock and prevents drift.
+    # When not charging, nothing is published so this has no effect.
+    pose1: /dock_pose_fix
+    pose1_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    pose1_queue_size: 5
+    pose1_nodelay: false
+    pose1_differential: false
+    pose1_relative: false
+
     # Process noise — elevated for position (x=0, y=1) because without GPS
     # the filter relies on wheel-derived velocity which drifts.  This makes
     # the filter rapidly snap back to GPS when it returns.
