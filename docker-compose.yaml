@@ -49,6 +49,7 @@ services:
   # -------------------------------------------------------------------------
   gps:
     container_name: mowgli-gps
+    image: ${GPS_IMAGE}
     build:
       context: ./gps
     network_mode: host
@@ -76,6 +77,7 @@ services:
   # -------------------------------------------------------------------------
   lidar:
     container_name: mowgli-lidar
+    image: ${LIDAR_IMAGE}
     build:
       context: ./lidar
     network_mode: host

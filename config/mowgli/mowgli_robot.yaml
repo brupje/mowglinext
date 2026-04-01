@@ -69,8 +69,8 @@ mowgli:
     # GPS / Positioning — MUST be set for your location
     # =================================================================
     gps_protocol: "UBX"           # UBX for u-blox, NMEA for others
-    datum_lat: 48.8831951         # map origin latitude  (WGS84)
-    datum_lon: 2.1661984          # map origin longitude (WGS84)
+    datum_lat: 48.87948444968149         # map origin latitude  (WGS84)
+    datum_lon: 2.1730724056657826          # map origin longitude (WGS84)
     use_relative_position: false  # false=datum origin, true=base station origin
 
     gps_wait_after_undock_sec: 10.0  # wait for RTK fix after undocking
@@ -82,7 +82,7 @@ mowgli:
 
     # NTRIP (RTK correction stream) — required for cm-level accuracy
     ntrip_enabled: true
-    ntrip_host: "crtk.net"
+    ntrip_host: "caster.centipede.fr"
     ntrip_port: 2101
     ntrip_user: "centipede"
     ntrip_password: "centipede"
@@ -171,5 +171,5 @@ mowgli:
 # ---------------------------------------------------------------------------
 navsat_to_absolute_pose:
   ros__parameters:
-    datum_lat: 48.8831951
-    datum_lon: 2.1661984
+    datum_lat: 48.87948444968149
+    datum_lon: 2.1730724056657826

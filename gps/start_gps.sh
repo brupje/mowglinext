@@ -3,8 +3,9 @@
 # GPS startup script — reads config from /config/mowgli_robot.yaml
 #
 # Launches:
-#   1. ublox_gps_node  — u-blox driver on the configured serial port
-#   2. ntrip_client    — RTK corrections (if ntrip_enabled is true)
+#   1. ublox_gps_node       — u-blox driver on the configured serial port
+#   2. ntrip_client         — RTK corrections from NTRIP caster → /rtcm topic
+#   3. rtcm_serial_bridge   — forwards /rtcm messages to GPS serial port
 # =============================================================================
 set -euo pipefail
 
@@ -76,10 +77,20 @@ if [ "$NTRIP_ENABLED" = "true" ]; then
     -p "authenticate:=true" \
     -p "rtcm_message_package:=rtcm_msgs" &
   NTRIP_PID=$!
+
+  # Bridge: forward /rtcm topic → GPS serial port
+  sleep 2
+  echo "[start_gps.sh] Starting RTCM→serial bridge on ${GPS_PORT}"
+  python3 /rtcm_serial_bridge.py \
+    --ros-args \
+    -p "device:=${GPS_PORT}" \
+    -p "baudrate:=${GPS_BAUD}" &
+  BRIDGE_PID=$!
 fi
 
 # Wait for any child to exit, then stop everything
 wait -n || true
 kill "$GPS_PID" 2>/dev/null || true
 [ -n "${NTRIP_PID:-}" ] && kill "$NTRIP_PID" 2>/dev/null || true
+[ -n "${BRIDGE_PID:-}" ] && kill "$BRIDGE_PID" 2>/dev/null || true
 wait
