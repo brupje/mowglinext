@@ -187,6 +187,14 @@ private:
     timer_heartbeat_ = create_wall_timer(hb_period_ms,
                                          [this]()
                                          {
+                                           // On startup, send emergency release for the first few
+                                           // heartbeats to clear any watchdog-latched emergency
+                                           // from the container restart gap.
+                                           if (startup_release_count_ > 0)
+                                           {
+                                             emergency_release_pending_ = true;
+                                             --startup_release_count_;
+                                           }
                                            send_heartbeat();
                                          });
 
@@ -664,6 +672,7 @@ private:
 
   bool emergency_active_{false};
   bool emergency_release_pending_{false};
+  int startup_release_count_{5};  // Send release for first 5 heartbeats
   bool mow_enabled_{false};
   bool is_charging_{false};
   uint8_t current_mode_{0};
