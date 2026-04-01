@@ -105,6 +105,23 @@ type MapArea struct {
 	Obstacles []geometry.Polygon `json:"obstacles"`
 }
 
+// TrackedObstacle matches mowgli_interfaces/TrackedObstacle
+type TrackedObstacle struct {
+	Id               uint32           `json:"id"`
+	Polygon          geometry.Polygon `json:"polygon"`
+	Centroid         geometry.Point   `json:"centroid"`
+	Radius           float64          `json:"radius"`
+	FirstSeen        geometry.Stamp   `json:"first_seen"`
+	ObservationCount uint32           `json:"observation_count"`
+	Status           uint8            `json:"status"`
+}
+
+// ObstacleArray matches mowgli_interfaces/ObstacleArray
+type ObstacleArray struct {
+	Header    geometry.Header   `json:"header"`
+	Obstacles []TrackedObstacle `json:"obstacles"`
+}
+
 // DockingSensor - placeholder, may not exist in ROS2 mowgli
 type DockingSensor struct {
 	DockPresent  bool    `json:"dock_present"`

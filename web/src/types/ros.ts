@@ -124,6 +124,19 @@ export type Map = {
     DockHeading?: number
 }
 
+export type TrackedObstacle = {
+    Id?: number
+    Polygon?: Polygon
+    Centroid?: Point
+    Radius?: number
+    ObservationCount?: number
+    Status?: number  // 0=TRANSIENT, 1=PERSISTENT
+}
+
+export type ObstacleArray = {
+    Obstacles?: TrackedObstacle[]
+}
+
 export type WheelTick = {
     /*
     WheelTickFactor  uint32

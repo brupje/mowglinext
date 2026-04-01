@@ -45,6 +45,7 @@ var topicMap = map[string]topicDef{
 	// NOTE: DockingSensor.msg does not exist in mowgli_interfaces yet; omitted to avoid rosbridge errors.
 	"lidar":         {"/scan", "sensor_msgs/msg/LaserScan"},
 	"diagnostics":   {"/diagnostics", "diagnostic_msgs/msg/DiagnosticArray"},
+	"obstacles":     {"/obstacle_tracker/obstacles", "mowgli_interfaces/msg/ObstacleArray"},
 }
 
 // ---------------------------------------------------------------------------

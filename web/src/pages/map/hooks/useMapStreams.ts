@@ -7,7 +7,9 @@ import {
     LaserScan,
     Map as MapType,
     MarkerArray,
+    ObstacleArray,
     Path,
+    TrackedObstacle,
 } from "../../../types/ros.ts";
 import {
     LineFeatureBase,
@@ -51,6 +53,7 @@ export function useMapStreams({
         type: "FeatureCollection",
         features: [],
     });
+    const [dynamicObstacles, setDynamicObstacles] = useState<TrackedObstacle[]>([]);
 
     const highLevelStatus = useHighLevelStatus();
 
@@ -230,6 +233,44 @@ export function useMapStreams({
         }
     );
 
+    const obstaclesStream = useWS<string>(
+        () => {},
+        () => { console.log({ message: "Obstacles Stream connected" }); },
+        (e) => {
+            const parsed = JSON.parse(e) as ObstacleArray;
+            if (parsed.Obstacles) {
+                // Only show persistent obstacles (status=1)
+                setDynamicObstacles(parsed.Obstacles.filter(o => o.Status === 1));
+
+                // Render obstacle polygons on the map
+                setFeatures((oldFeatures) => {
+                    const newFeatures = { ...oldFeatures };
+                    // Remove old dynamic obstacle features
+                    Object.keys(newFeatures).forEach(k => {
+                        if (k.startsWith("dyn-obs-")) delete newFeatures[k];
+                    });
+                    // Add current obstacles as semi-transparent polygons
+                    (parsed.Obstacles ?? []).filter(o => o.Status === 1).forEach((obs) => {
+                        if (obs.Polygon?.Points && obs.Polygon.Points.length >= 3) {
+                            const coords = obs.Polygon.Points.map(p =>
+                                transpose(offsetX, offsetY, datum, p.Y ?? 0, p.X ?? 0)
+                            );
+                            // Close the polygon
+                            coords.push(coords[0]);
+                            newFeatures["dyn-obs-" + obs.Id] = new PathFeature(
+                                "dyn-obs-" + obs.Id,
+                                coords,
+                                "rgba(255, 100, 100, 0.4)",
+                                0.1
+                            );
+                        }
+                    });
+                    return newFeatures;
+                });
+            }
+        }
+    );
+
     // Keep lidar layer on top of draw layers
     useEffect(() => {
         const m = mapInstanceRef.current;
@@ -250,6 +291,7 @@ export function useMapStreams({
             planStream.stop();
             mowingPathStream.stop();
             lidarStream.stop();
+            obstaclesStream.stop();
             highLevelStatus.stop();
             setPath(undefined);
             setPlan(undefined);
@@ -268,6 +310,7 @@ export function useMapStreams({
             planStream.start("/api/openmower/subscribe/plan");
             mowingPathStream.start("/api/openmower/subscribe/mowingPath");
             lidarStream.start("/api/openmower/subscribe/lidar");
+            obstaclesStream.start("/api/openmower/subscribe/obstacles");
         }
     }, [editMap]);
 
@@ -296,6 +339,7 @@ export function useMapStreams({
         planStream.start("/api/openmower/subscribe/plan");
         mowingPathStream.start("/api/openmower/subscribe/mowingPath");
         lidarStream.start("/api/openmower/subscribe/lidar");
+        obstaclesStream.start("/api/openmower/subscribe/obstacles");
     }, [settings]);
 
     // Cleanup all streams on unmount
@@ -308,12 +352,14 @@ export function useMapStreams({
             planStream.stop();
             mowingPathStream.stop();
             lidarStream.stop();
+            obstaclesStream.stop();
             highLevelStatus.stop();
         };
     }, []);
 
     return {
         map,
+        dynamicObstacles,
         setMap,
         path,
         plan,
