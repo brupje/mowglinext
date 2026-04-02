@@ -53,8 +53,9 @@ ekf_odom:
     # IMU: fuse yaw (differential) and yaw rate.
     # differential=true means the EKF uses yaw CHANGES between messages,
     # not the absolute integrated value. This avoids gyro drift while
-    # still giving the EKF smooth heading dynamics. SLAM provides
-    # the absolute heading reference via LiDAR map matching.
+    # still giving the EKF smooth heading dynamics. Absolute heading
+    # references come from: GPS velocity heading (when moving with RTK)
+    # and dock_pose_fix (when docked).
     imu0: /imu/data
     imu0_config: [false, false, false,
                   false, false, true,
@@ -67,11 +68,10 @@ ekf_odom:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    # NOTE: GPS heading (/navheading) removed from odom EKF.
-    # Single-antenna F9P heading is only valid when moving (derived from
-    # velocity vector). When stationary, the covariance is 1000 but the
-    # EKF still slowly drags orientation toward the random value.
-    # Heading comes from: IMU gyro (bias-compensated) + SLAM map matching.
+    # NOTE: GPS heading is fused in ekf_map (not here in ekf_odom).
+    # The gps_pose_converter derives heading from consecutive GPS positions
+    # and sets yaw covariance based on speed + RTK quality. When stationary,
+    # the very large yaw variance lets the IMU gyro dominate heading.
 
     # Process noise tuning — HIGH values for velocity states (vx=6, vy=7)
     # because wheel ticks drift on real terrain.  Position states (x=0, y=1)
@@ -121,14 +121,14 @@ ekf_map:
     odom0_relative: false
 
     # GPS pose (PoseWithCovarianceStamped from gps_pose_converter or sim remap).
-    # Production: gps_pose_converter publishes to /gps/pose with covariance
-    #   from the receiver — RTK fix: ~2cm, float: ~20cm, DGPS: ~1m.
-    # The EKF automatically trusts GPS more when covariance is low.
-    # Simulation: gps_degradation_sim publishes to /gps/pose_sim — the sim
-    #   launch remaps it to /gps/pose when use_ekf is true.
+    # Position: covariance from receiver quality — RTK fix ~2cm, float ~20cm.
+    # Heading: derived from velocity vector by gps_pose_converter. The yaw
+    #   covariance is speed-dependent: tight when moving (GPS heading reliable),
+    #   very large when stationary (IMU dominates). This aligns the map frame
+    #   with geographic ENU when the robot is moving.
     pose0: /gps/pose
     pose0_config: [true,  true,  false,
-                   false, false, false,
+                   false, false, true,
                    false, false, false,
                    false, false, false,
                    false, false, false]
