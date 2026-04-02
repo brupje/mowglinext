@@ -238,22 +238,6 @@ func nestToROS2YAML(flat map[string]any, nodeMappings map[string]string, existin
 		nodeMap["ros__parameters"] = rosParams
 	}
 
-	// Keep datum_lat/datum_lon in sync between mowgli and navsat nodes
-	if mowgliNode, ok := result["mowgli"].(map[string]any); ok {
-		if mowgliParams, ok := mowgliNode["ros__parameters"].(map[string]any); ok {
-			if navNode, ok := result["navsat_to_absolute_pose"].(map[string]any); ok {
-				if navParams, ok := navNode["ros__parameters"].(map[string]any); ok {
-					if lat, ok := navParams["datum_lat"]; ok {
-						mowgliParams["datum_lat"] = lat
-					}
-					if lon, ok := navParams["datum_lon"]; ok {
-						mowgliParams["datum_lon"] = lon
-					}
-				}
-			}
-		}
-	}
-
 	return result
 }
 

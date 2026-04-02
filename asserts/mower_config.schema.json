@@ -136,15 +136,13 @@
           "type": "number",
           "title": "Datum Latitude",
           "default": 0.0,
-          "description": "Map origin latitude (WGS84). Set near your docking station.",
-          "x-yaml-node": "navsat_to_absolute_pose"
+          "description": "Map origin latitude (WGS84). Set near your docking station."
         },
         "datum_lon": {
           "type": "number",
           "title": "Datum Longitude",
           "default": 0.0,
-          "description": "Map origin longitude (WGS84). Set near your docking station.",
-          "x-yaml-node": "navsat_to_absolute_pose"
+          "description": "Map origin longitude (WGS84). Set near your docking station."
         },
         "gps_protocol": {
           "type": "string",
