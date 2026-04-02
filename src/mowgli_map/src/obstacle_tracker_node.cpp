@@ -188,8 +188,10 @@ void ObstacleTrackerNode::on_costmap(nav_msgs::msg::OccupancyGrid::ConstSharedPt
 
   if (w == 0 || h == 0) return;
 
-  // Mark occupied cells (cost >= LETHAL_OBSTACLE = 100 in Nav2 costmaps)
-  constexpr int8_t LETHAL = 100;
+  // Mark cells that are unsafe for the robot (cost >= 50 captures the
+  // inflation zone, not just lethal cells). This gives obstacle polygons
+  // that match the full no-go area including safety margin.
+  constexpr int8_t OBSTACLE_COST = 50;
   std::vector<bool> visited(w * h, false);
   std::vector<std::vector<std::pair<double, double>>> clusters;
 
@@ -199,7 +201,7 @@ void ObstacleTrackerNode::on_costmap(nav_msgs::msg::OccupancyGrid::ConstSharedPt
     for (int x = 0; x < w; ++x)
     {
       const int idx = y * w + x;
-      if (visited[idx] || msg->data[idx] < LETHAL) continue;
+      if (visited[idx] || msg->data[idx] < OBSTACLE_COST) continue;
 
       // BFS flood-fill
       std::vector<std::pair<double, double>> cluster;
@@ -224,7 +226,7 @@ void ObstacleTrackerNode::on_costmap(nav_msgs::msg::OccupancyGrid::ConstSharedPt
           if (nx >= 0 && nx < w && ny >= 0 && ny < h)
           {
             int nidx = ny * w + nx;
-            if (!visited[nidx] && msg->data[nidx] >= LETHAL)
+            if (!visited[nidx] && msg->data[nidx] >= OBSTACLE_COST)
             {
               visited[nidx] = true;
               queue.emplace_back(nx, ny);

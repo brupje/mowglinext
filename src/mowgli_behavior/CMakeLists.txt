@@ -34,7 +34,6 @@ find_package(std_srvs REQUIRED)
 find_package(mowgli_interfaces REQUIRED)
 find_package(slam_toolbox REQUIRED)
 find_package(robot_localization REQUIRED)
-find_package(opennav_coverage_msgs REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Executable: behavior_tree_node
@@ -70,7 +69,6 @@ ament_target_dependencies(behavior_tree_node
   mowgli_interfaces
   slam_toolbox
   robot_localization
-  opennav_coverage_msgs
 )
 
 # ---------------------------------------------------------------------------

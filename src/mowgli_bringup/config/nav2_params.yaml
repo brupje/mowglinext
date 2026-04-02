@@ -80,7 +80,7 @@ controller_server:
       use_velocity_scaled_lookahead_dist: false
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.6
-      use_collision_detection: true
+      use_collision_detection: false
       use_regulated_linear_velocity_scaling: true
       use_fixed_curvature_lookahead: false
       curvature_lookahead_dist: 0.6
@@ -111,15 +111,13 @@ controller_server:
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.4
       # Collision detection during coverage mowing: disabled.
-      # RPP collision detection uses the local costmap to check for obstacles
-      # in the carrot lookahead direction. During mowing, swaths run parallel
-      # to boundaries and near obstacles — the inflated costmap triggers
-      # "collision ahead" continuously, exceeding controller patience.
-      # Real obstacle avoidance during mowing relies on the collision_monitor
-      # node (FootprintApproach polygon) which watches the actual LiDAR scan,
-      # not the costmap. Transit uses SmacPlanner2D which naturally avoids
-      # obstacles via the global costmap.
-      use_collision_detection: true
+      # RPP uses the local costmap to check for obstacles ahead. During
+      # mowing, swaths run near boundaries — inflated costmap triggers
+      # false "collision ahead". Real obstacle avoidance relies on the
+      # collision_monitor node (FootprintApproach) which watches LiDAR.
+      # In simulation, Gazebo LiDAR self-reflections from the chassis
+      # also trigger false collisions.
+      use_collision_detection: false
       # Slow down near obstacles detected in costmap (inflation layer costs).
       use_regulated_linear_velocity_scaling: true
       use_cost_regulated_linear_velocity_scaling: true
@@ -247,6 +245,9 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_link
+      # Allow up to 60s for map→base_link TF to appear (SLAM needs time to
+      # initialize scan matching before publishing map→odom).
+      transform_tolerance: 60.0
       # Rectangular footprint from URDF: 0.54m x 0.40m (base_link collision box)
       footprint: "[[0.27, 0.20], [0.27, -0.20], [-0.27, -0.20], [-0.27, 0.20]]"
       resolution: 0.05
@@ -292,7 +293,7 @@ global_costmap:
         # 0.30m ≈ robot half-width (0.27m) + small buffer. Keeps transit
         # paths close to obstacles without losing too much mowing area.
         cost_scaling_factor: 5.0
-        inflation_radius: 0.30
+        inflation_radius: 0.40
 
 # ---------------------------------------------------------------------------
 # Local costmap
@@ -351,7 +352,7 @@ local_costmap:
         # Tight inflation for local costmap: robot half-width + small margin.
         # Minimizes unmowed area around obstacles during coverage.
         cost_scaling_factor: 5.0
-        inflation_radius: 0.30
+        inflation_radius: 0.40
 
 # ---------------------------------------------------------------------------
 # Map server / AMCL (not used with slam_toolbox, kept for completeness)
@@ -449,13 +450,15 @@ collision_monitor:
       min_points: 1
       visualize: true
       enabled: true
+    # Scan source for obstacle detection. The Gazebo LiDAR uses
+    # visibility_mask to exclude the robot's own mesh, preventing
+    # self-reflections from triggering false stops.
     observation_sources: ["scan"]
     scan:
       type: "scan"
       topic: /scan
       min_height: 0.15
       max_height: 2.0
-      # LiDAR range_min=0.35m in model.sdf filters chassis self-reflections.
       enabled: true
 
 # ---------------------------------------------------------------------------

@@ -62,10 +62,9 @@ void SlamHeadingNode::timer_callback()
 {
   geometry_msgs::msg::TransformStamped tf;
   try {
-    // Look up SLAM's slam_map→odom transform.
-    // slam_toolbox publishes to slam_map (not map) to avoid conflicts
-    // with ekf_map which owns the authoritative map→odom TF.
-    tf = tf_buffer_->lookupTransform("slam_map", "odom", tf2::TimePointZero);
+    // Look up SLAM's map→odom transform.
+    // SLAM is the authority for this transform (ekf_map has publish_tf=false).
+    tf = tf_buffer_->lookupTransform("map", "odom", tf2::TimePointZero);
   } catch (const tf2::TransformException &) {
     // SLAM TF not available — don't publish anything.
     // The EKF will rely on GPS heading and IMU.

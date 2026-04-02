@@ -98,9 +98,11 @@ ekf_map:
     frequency: 20.0
     sensor_timeout: 0.2
     two_d_mode: true
-    # ekf_map publishes map→odom TF using GPS + dock pose fix.
-    # SLAM's TF publishing is disabled to avoid conflicts.
-    publish_tf: true
+    # SLAM publishes map→odom TF (scan matching is the position authority).
+    # ekf_map does NOT publish TF — its state estimate is available on
+    # /odometry/filtered_map but TF comes from SLAM for consistency with
+    # the costmap and LiDAR frame transforms.
+    publish_tf: false
     odom_frame: odom
     base_link_frame: base_link
     world_frame: map

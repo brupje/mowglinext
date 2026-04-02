@@ -39,7 +39,7 @@ def generate_launch_description() -> LaunchDescription:
     bringup_dir = get_package_share_directory("mowgli_bringup")
     behavior_dir = get_package_share_directory("mowgli_behavior")
     map_dir = get_package_share_directory("mowgli_map")
-    # coverage_dir removed: opennav_coverage reads from nav2_params.yaml
+    coverage_dir = get_package_share_directory("mowgli_coverage_planner")
     monitoring_dir = get_package_share_directory("mowgli_monitoring")
 
     # ------------------------------------------------------------------
@@ -67,12 +67,6 @@ def generate_launch_description() -> LaunchDescription:
         "map",
         default_value="",
         description="Absolute path to a pre-built map yaml file (used when slam=false).",
-    )
-
-    enable_coverage_arg = DeclareLaunchArgument(
-        "enable_coverage",
-        default_value="false",
-        description="Launch opennav_coverage server when true.",
     )
 
     enable_mqtt_arg = DeclareLaunchArgument(
@@ -112,7 +106,6 @@ def generate_launch_description() -> LaunchDescription:
     serial_port = LaunchConfiguration("serial_port")
     slam = LaunchConfiguration("slam")
     map_yaml = LaunchConfiguration("map")
-    enable_coverage = LaunchConfiguration("enable_coverage")
     enable_mqtt = LaunchConfiguration("enable_mqtt")
     enable_foxglove = LaunchConfiguration("enable_foxglove")
     foxglove_port = LaunchConfiguration("foxglove_port")
@@ -128,6 +121,7 @@ def generate_launch_description() -> LaunchDescription:
     localization_params = os.path.join(bringup_dir, "config", "localization.yaml")
     monitoring_params = os.path.join(monitoring_dir, "config", "diagnostics.yaml")
     mqtt_params = os.path.join(monitoring_dir, "config", "mqtt_bridge.yaml")
+    coverage_params = os.path.join(coverage_dir, "config", "coverage_planner.yaml")
     # Robot-specific config (bind-mounted from mowgli-docker/config/mowgli/)
     robot_config = "/ros2_ws/config/mowgli_robot.yaml"
 
@@ -197,33 +191,16 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
-    # 5. Coverage server (opennav_coverage)
+    # 5. Coverage planner (Fields2Cover v2 — replaces opennav_coverage)
     # ------------------------------------------------------------------
-    coverage_server_node = Node(
-        condition=IfCondition(enable_coverage),
-        package="opennav_coverage",
-        executable="opennav_coverage",
-        name="coverage_server",
+    coverage_planner_node = Node(
+        package="mowgli_coverage_planner",
+        executable="coverage_planner_node",
+        name="coverage_planner_node",
         output="screen",
         parameters=[
-            nav2_params_file,
+            coverage_params,
             {"use_sim_time": use_sim_time},
-        ],
-    )
-
-    coverage_lifecycle_manager = Node(
-        condition=IfCondition(enable_coverage),
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_coverage",
-        output="screen",
-        parameters=[
-            {
-                "use_sim_time": use_sim_time,
-                "autostart": True,
-                "node_names": ["coverage_server"],
-                "bond_timeout": 10.0,
-            },
         ],
     )
 
@@ -413,7 +390,6 @@ def generate_launch_description() -> LaunchDescription:
             serial_port_arg,
             slam_arg,
             map_arg,
-            enable_coverage_arg,
             enable_mqtt_arg,
             enable_foxglove_arg,
             foxglove_port_arg,
@@ -425,8 +401,7 @@ def generate_launch_description() -> LaunchDescription:
             # Individual nodes
             behavior_tree_node,
             map_server_node,
-            coverage_server_node,
-            coverage_lifecycle_manager,
+            coverage_planner_node,
             obstacle_tracker_node,
             wheel_odometry_node,
             navsat_converter_node,
