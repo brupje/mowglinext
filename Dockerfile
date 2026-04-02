@@ -36,6 +36,7 @@ RUN pio pkg install -g \
 FROM deps
 COPY --from=build-web /web/dist /app/web
 COPY --from=build-go /app/openmower-gui /app/openmower-gui
+COPY asserts /app/asserts
 ENV WEB_DIR=/app/web
 ENV DB_PATH=/app/db
 WORKDIR /app

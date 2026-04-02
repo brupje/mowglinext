@@ -504,10 +504,14 @@ const CompleteStep: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Auto-restart the OpenMower container on mount
+        // Mark onboarding as completed and restart the OpenMower container
         (async () => {
             setRestarting(true);
             try {
+                // Mark onboarding done in DB so we don't redirect again
+                const base = import.meta.env.DEV ? 'http://localhost:4006' : '';
+                await fetch(`${base}/api/settings/status`, { method: 'POST' });
+
                 const res = await guiApi.containers.containersList();
                 if (res.error) throw new Error(res.error.error);
                 const container = res.data.containers?.find(

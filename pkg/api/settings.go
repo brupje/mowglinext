@@ -25,19 +25,27 @@ func SettingsRoutes(r *gin.RouterGroup, dbProvider types.IDBProvider) {
 	GetSettingsYAML(r, dbProvider)
 	PostSettingsYAML(r, dbProvider)
 	GetSettingsStatus(r, dbProvider)
+	PostSettingsStatus(r, dbProvider)
 }
 
-// GetSettingsStatus returns whether the mowgli_robot.yaml config file exists.
+// GetSettingsStatus returns whether onboarding has been completed.
 // Used by the frontend to decide whether to show the onboarding wizard.
 func GetSettingsStatus(r *gin.RouterGroup, dbProvider types.IDBProvider) gin.IRoutes {
 	return r.GET("/settings/status", func(c *gin.Context) {
-		configFilePath, err := dbProvider.Get("system.mower.yamlConfigFile")
-		if err != nil {
-			c.JSON(200, gin.H{"configured": false})
+		val, err := dbProvider.Get("onboarding.completed")
+		completed := err == nil && string(val) == "true"
+		c.JSON(200, gin.H{"onboarding_completed": completed})
+	})
+}
+
+// PostSettingsStatus marks onboarding as completed.
+func PostSettingsStatus(r *gin.RouterGroup, dbProvider types.IDBProvider) gin.IRoutes {
+	return r.POST("/settings/status", func(c *gin.Context) {
+		if err := dbProvider.Set("onboarding.completed", []byte("true")); err != nil {
+			c.JSON(500, ErrorResponse{Error: err.Error()})
 			return
 		}
-		_, err = os.Stat(string(configFilePath))
-		c.JSON(200, gin.H{"configured": err == nil})
+		c.JSON(200, OkResponse{})
 	})
 }
 

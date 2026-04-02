@@ -52,7 +52,7 @@ export default function Root() {
     const [railExpanded, setRailExpanded] = useState(false);
     const {showPrompt: showInstallPrompt, dismiss: dismissInstallPrompt} = useIOSInstallPrompt();
 
-    // On first load, check if the robot is configured. If not, redirect to onboarding.
+    // On first load, check if onboarding was completed. If not, redirect to onboarding.
     const [configChecked, setConfigChecked] = useState(false);
     useEffect(() => {
         if (configChecked) return;
@@ -61,7 +61,7 @@ export default function Root() {
                 const base = import.meta.env.DEV ? 'http://localhost:4006' : '';
                 const res = await fetch(`${base}/api/settings/status`);
                 const data = await res.json();
-                if (!data.configured && currentPath !== '/onboarding') {
+                if (!data.onboarding_completed && currentPath !== '/onboarding') {
                     navigate({pathname: '/onboarding'});
                 }
             } catch { /* ignore — backend not reachable */ }
