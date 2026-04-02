@@ -32,6 +32,10 @@
   <xacro:arg name="imu_z"     default="0.095"/>
   <xacro:arg name="imu_yaw"   default="0.0"/>
 
+  <xacro:arg name="gps_x"     default="0.0"/>
+  <xacro:arg name="gps_y"     default="0.0"/>
+  <xacro:arg name="gps_z"     default="0.20"/>
+
   <!-- ================================================================
        Properties
        ================================================================ -->
@@ -333,8 +337,7 @@
   <joint name="gps_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="gps_link"/>
-    <!-- Mounted on top surface, centred -->
-    <origin xyz="0 0 ${base_height + 0.01}" rpy="0 0 0"/>
+    <origin xyz="$(arg gps_x) $(arg gps_y) $(arg gps_z)" rpy="0 0 0"/>
   </joint>
 
   <!-- ================================================================

@@ -84,6 +84,11 @@ def generate_launch_description() -> LaunchDescription:
     imu_z   = str(robot_params.get("imu_z", "0.095"))
     imu_yaw = str(robot_params.get("imu_yaw", "0.0"))
 
+    # GPS antenna position from robot config (with defaults)
+    gps_x   = str(robot_params.get("gps_x", "0.0"))
+    gps_y   = str(robot_params.get("gps_y", "0.0"))
+    gps_z   = str(robot_params.get("gps_z", "0.20"))
+
     robot_description_content = Command(
         [
             FindExecutable(name="xacro"),
@@ -97,6 +102,9 @@ def generate_launch_description() -> LaunchDescription:
             " imu_y:=", imu_y,
             " imu_z:=", imu_z,
             " imu_yaw:=", imu_yaw,
+            " gps_x:=", gps_x,
+            " gps_y:=", gps_y,
+            " gps_z:=", gps_z,
         ]
     )
 
