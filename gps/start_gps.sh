@@ -58,8 +58,8 @@ EOF
 ros2 run ublox_gps ublox_gps_node --ros-args \
   --params-file /f9p_rover.yaml \
   --params-file /tmp/ublox_override.yaml \
-  -r /fix:=/ublox_gps_node/fix \
-  -r /fix_velocity:=/ublox_gps_node/fix_velocity &
+  -r /fix:=/gps/fix \
+  -r /fix_velocity:=/gps/fix_velocity &
 GPS_PID=$!
 
 # Launch NTRIP client if enabled
