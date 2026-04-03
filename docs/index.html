@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MowgliNext — Open-Source ROS2 Robot Mower</title>
+  <meta name="description" content="Autonomous robot mower built on ROS2 Jazzy with LiDAR SLAM, RTK-GPS, behavior trees, and coverage planning. Open source, community driven, AI powered.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ─── Navigation ──────────────────────────────────── -->
+<nav>
+  <div class="container">
+    <div class="logo">Mowgli<span>Next</span></div>
+    <ul class="links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#getting-started">Get Started</a></li>
+      <li><a href="#hardware">Hardware</a></li>
+      <li><a href="https://github.com/cedbossneo/mowglinext/wiki">Wiki</a></li>
+      <li><a href="https://github.com/cedbossneo/mowglinext">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ─── Hero ────────────────────────────────────────── -->
+<section class="hero">
+  <div class="container">
+    <h1>Mowgli<span>Next</span></h1>
+    <p class="tagline">
+      Open-source autonomous robot mower built on ROS2 Jazzy.
+      LiDAR SLAM, RTK-GPS, behavior trees, and intelligent coverage planning — all in one monorepo.
+    </p>
+    <div class="buttons">
+      <a href="#getting-started" class="btn btn-primary">Get Started</a>
+      <a href="https://github.com/cedbossneo/mowglinext" class="btn btn-secondary">View on GitHub</a>
+      <a href="https://github.com/cedbossneo/mowglinext/wiki" class="btn btn-secondary">Documentation</a>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Features ────────────────────────────────────── -->
+<section class="features" id="features">
+  <div class="container">
+    <h2>What Makes MowgliNext Different</h2>
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="icon">🗺️</div>
+        <h3>LiDAR SLAM</h3>
+        <p>Real-time mapping and localization using SLAM Toolbox, optimized for outdoor environments. No pre-built maps needed.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">📡</div>
+        <h3>RTK-GPS Fusion</h3>
+        <p>Dual Extended Kalman Filter fusing wheel odometry, IMU, and RTK-GPS for centimeter-accurate outdoor positioning.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🧠</div>
+        <h3>Behavior Trees</h3>
+        <p>Reactive, composable control logic using BehaviorTree.CPP v4. Emergency guards, docking, coverage — all orchestrated by a single tree.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🔄</div>
+        <h3>Coverage Planning</h3>
+        <p>Fields2Cover v2 generates optimal boustrophedon mowing patterns with headland passes, configurable angles, and obstacle awareness.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🚧</div>
+        <h3>Obstacle Avoidance</h3>
+        <p>Real-time collision monitor with polygon stop/slow zones. The robot navigates around obstacles, not just stops.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🐳</div>
+        <h3>Docker Deployment</h3>
+        <p>One-command deployment with Docker Compose. Cyclone DDS for reliable inter-container communication on ARM boards.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🌐</div>
+        <h3>Web GUI</h3>
+        <p>React + Go web interface for configuration, map editing, area management, and real-time monitoring from any device.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🤖</div>
+        <h3>AI-Powered Development</h3>
+        <p>Claude reviews every PR, proposes improvements weekly, and responds to @claude mentions in issues. Community + AI collaboration.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="icon">🔓</div>
+        <h3>Fully Open Source</h3>
+        <p>GPLv3 licensed. ROS2 stack, firmware, GUI, Docker configs — everything in one monorepo. Fork it, modify it, contribute back.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ─── Architecture ────────────────────────────────── -->
+<section class="architecture" id="architecture">
+  <div class="container">
+    <h2>System Architecture</h2>
+    <div class="arch-diagram"><span class="accent">Web GUI</span> (:4006)                    <span class="accent">Foxglove</span> (:8765)
+    │                                  │
+    ▼                                  ▼
+┌──────────────────────────────────────────────────────┐
+│  <span class="highlight">ROS2 Jazzy Stack</span>                                     │
+│                                                      │
+│  ┌─────────────┐  ┌──────────┐  ┌─────────────────┐ │
+│  │  <span class="highlight">Nav2</span>        │  │  <span class="highlight">SLAM</span>    │  │  <span class="highlight">Behavior Tree</span>  │ │
+│  │  navigate    │  │  Toolbox  │  │  main_tree.xml  │ │
+│  │  dock/undock │  │          │  │  10 Hz tick     │ │
+│  │  coverage    │  │          │  │                 │ │
+│  └─────────────┘  └──────────┘  └─────────────────┘ │
+│  ┌─────────────┐  ┌──────────┐  ┌─────────────────┐ │
+│  │  <span class="highlight">Coverage</span>    │  │ <span class="highlight">Localiz.</span> │  │  <span class="highlight">Hardware</span>       │ │
+│  │  Planner     │  │ Dual EKF │  │  Bridge         │ │
+│  │  (F2C v2)    │  │ GPS+IMU  │  │  COBS serial    │ │
+│  └─────────────┘  └──────────┘  └────────┬────────┘ │
+└───────────────────────────────────────────┼──────────┘
+          │                │                │
+    ┌─────┴─────┐   ┌─────┴─────┐   ┌──────┴──────┐
+    │ <span class="accent">GPS</span>       │   │ <span class="accent">LiDAR</span>     │   │ <span class="accent">STM32</span>      │
+    │ u-blox    │   │ LD19      │   │ Firmware    │
+    │ ZED-F9P   │   │ /scan     │   │ Motors/IMU  │
+    │ RTK+NTRIP │   │           │   │ Blade safety│
+    └───────────┘   └───────────┘   └─────────────┘</div>
+  </div>
+</section>
+
+<!-- ─── Getting Started ─────────────────────────────── -->
+<section class="getting-started" id="getting-started">
+  <div class="container">
+    <h2>Get Started in 3 Steps</h2>
+    <div class="steps">
+
+      <div class="step">
+        <div class="step-number">1</div>
+        <h3>Clone the Repo</h3>
+        <p>Get the full monorepo — ROS2 stack, Docker, GUI, sensors, and firmware.</p>
+        <code>git clone https://github.com/cedbossneo/mowglinext.git
+cd mowglinext</code>
+      </div>
+
+      <div class="step">
+        <div class="step-number">2</div>
+        <h3>Configure Your Mower</h3>
+        <p>Edit the robot config with your GPS datum, dock position, and sensor setup.</p>
+        <code>cp docker/.env.example docker/.env
+nano docker/config/mowgli/mowgli_robot.yaml</code>
+      </div>
+
+      <div class="step">
+        <div class="step-number">3</div>
+        <h3>Launch</h3>
+        <p>Start all services with Docker Compose. GUI available at port 4006.</p>
+        <code>cd docker
+docker compose up -d</code>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ─── Hardware ────────────────────────────────────── -->
+<section class="hardware" id="hardware">
+  <div class="container">
+    <h2>Supported Hardware</h2>
+    <div class="hw-grid">
+
+      <div class="hw-item">
+        <div class="icon">🏗️</div>
+        <h4>YardForce Classic 500</h4>
+        <p>500, 500B, LUV1000Ri</p>
+      </div>
+
+      <div class="hw-item">
+        <div class="icon">💻</div>
+        <h4>ARM64 SBC</h4>
+        <p>Rockchip RK3566/RK3588, Pi 4/5</p>
+      </div>
+
+      <div class="hw-item">
+        <div class="icon">📡</div>
+        <h4>RTK GPS</h4>
+        <p>u-blox ZED-F9P, RTK1010</p>
+      </div>
+
+      <div class="hw-item">
+        <div class="icon">🔴</div>
+        <h4>LiDAR</h4>
+        <p>LDRobot LD19, RPLiDAR</p>
+      </div>
+
+      <div class="hw-item">
+        <div class="icon">⚡</div>
+        <h4>STM32 Board</h4>
+        <p>Custom Mowgli PCB</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ─── Community ───────────────────────────────────── -->
+<section class="community" id="community">
+  <div class="container">
+    <h2>Community Powered, AI Assisted</h2>
+    <p>
+      MowgliNext is built by the community with AI assistance. Claude reviews every PR,
+      proposes improvements, and answers questions. Mention <strong>@claude</strong> in any issue or PR.
+    </p>
+    <div class="buttons">
+      <a href="https://github.com/cedbossneo/mowglinext/discussions" class="btn btn-primary">Join Discussions</a>
+      <a href="https://github.com/cedbossneo/mowglinext/blob/main/CONTRIBUTING.md" class="btn btn-secondary">Contributing Guide</a>
+      <a href="https://github.com/cedbossneo/mowglinext/issues/new/choose" class="btn btn-secondary">Report a Bug</a>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Footer ──────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <p>
+      MowgliNext is <a href="https://github.com/cedbossneo/mowglinext/blob/main/LICENSE">GPLv3 licensed</a>.
+      Built on <a href="https://docs.ros.org/en/jazzy/">ROS2 Jazzy</a>,
+      <a href="https://docs.nav2.org/">Nav2</a>, and
+      <a href="https://fields2cover.github.io/">Fields2Cover</a>.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

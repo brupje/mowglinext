@@ -43,10 +43,10 @@ ros2 launch mowgli_bringup simulation.launch.py
 
 ## Documentation
 
-Full documentation is in [`docs/`](../docs/):
+Full documentation is on the [wiki](https://github.com/cedbossneo/mowglinext/wiki):
 
-- [Architecture](../docs/ARCHITECTURE.md) — system design, data flow, TF tree
-- [Configuration](../docs/CONFIGURATION.md) — all YAML parameters
-- [Simulation](../docs/SIMULATION.md) — Gazebo Harmonic guide
-- [Firmware Integration](../docs/FIRMWARE_MIGRATION.md) — STM32 COBS protocol
-- [Full Index](../docs/INDEX.md) — searchable topic index
+- [Architecture](https://github.com/cedbossneo/mowglinext/wiki/Architecture) — system design, data flow, TF tree
+- [Configuration](https://github.com/cedbossneo/mowglinext/wiki/Configuration) — all YAML parameters
+- [Simulation](https://github.com/cedbossneo/mowglinext/wiki/Simulation) — Gazebo Harmonic guide
+- [Firmware](https://github.com/cedbossneo/mowglinext/wiki/Firmware) — STM32 COBS protocol
+- [Behavior Trees](https://github.com/cedbossneo/mowglinext/wiki/Behavior-Trees) — BT nodes and control flow

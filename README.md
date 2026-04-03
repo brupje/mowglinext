@@ -2,6 +2,8 @@
 
 Autonomous robot mower built on ROS2 Jazzy — a complete rewrite of OpenMower for YardForce Classic 500 hardware with LiDAR, behavior trees, and modern navigation.
 
+**[Website](https://cedbossneo.github.io/mowglinext/)** | **[Wiki](https://github.com/cedbossneo/mowglinext/wiki)** | **[Discussions](https://github.com/cedbossneo/mowglinext/discussions)** | **[Issues](https://github.com/cedbossneo/mowglinext/issues)**
+
 ## Monorepo Structure
 
 | Directory | Description |
@@ -11,7 +13,20 @@ Autonomous robot mower built on ROS2 Jazzy — a complete rewrite of OpenMower f
 | [`sensors/`](sensors/) | Dockerized sensor drivers (GPS, LiDAR) — one directory per model |
 | [`gui/`](gui/) | React + Go web interface for configuration, map editing, and monitoring |
 | [`firmware/`](firmware/) | STM32 firmware for motor control, IMU, blade safety |
-| [`docs/`](docs/) | Architecture, configuration reference, simulation guide |
+
+## Quick Start
+
+```bash
+git clone https://github.com/cedbossneo/mowglinext.git
+cd mowglinext/docker
+cp .env.example .env
+nano config/mowgli/mowgli_robot.yaml  # Set your GPS datum, dock pose, NTRIP
+docker compose up -d
+```
+
+GUI at `http://<mower-ip>:4006` | Foxglove at `ws://<mower-ip>:8765`
+
+See the [Getting Started](https://github.com/cedbossneo/mowglinext/wiki/Getting-Started) wiki page for full setup instructions.
 
 ## Architecture
 
@@ -38,9 +53,13 @@ Autonomous robot mower built on ROS2 Jazzy — a complete rewrite of OpenMower f
 └──────────────────────┴──────────────────────────┘
 ```
 
-## Quick Start
+## Documentation
 
-See [`docker/README.md`](docker/README.md) for deployment instructions, or browse the full [documentation](docs/).
+| Resource | What's there |
+|----------|-------------|
+| [Website](https://cedbossneo.github.io/mowglinext/) | Landing page, features overview, getting started |
+| [Wiki](https://github.com/cedbossneo/mowglinext/wiki) | Full reference: architecture, configuration, deployment, sensors, firmware, BT, FAQ |
+| [Discussions](https://github.com/cedbossneo/mowglinext/discussions) | Community Q&A |
 
 ## Hardware
 
@@ -50,15 +69,14 @@ See [`docker/README.md`](docker/README.md) for deployment instructions, or brows
 - u-blox ZED-F9P RTK GPS (USB-CDC)
 - Custom STM32 board for motor/blade/IMU
 
-## Key Design Decisions
+## Contributing
 
-- **base_link at rear wheel axis** — OpenMower convention
-- **SLAM is sole TF authority** — EKF publishes odometry only, not TF
-- **Cyclone DDS** — replaces FastRTPS (stale shm issues on ARM)
-- **Map frame = GPS frame** — X=east, Y=north, no rotation
-- **Firmware is blade safety authority** — ROS2 blade control is fire-and-forget
-- **Collision monitor for real-time avoidance** — costmap obstacles disabled in coverage planner
+We welcome contributions! Claude AI reviews every PR and assists in issues.
+
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- Mention **@claude** in any issue or PR for AI assistance
 
 ## License
 
-See individual component directories for license information.
+[GPLv3](LICENSE)
