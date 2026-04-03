@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allowedTools": [
+      "Bash(colcon build:*)",
+      "Bash(colcon test:*)",
+      "Bash(colcon test-result:*)",
+      "Bash(ros2 topic:*)",
+      "Bash(ros2 service:*)",
+      "Bash(ros2 node:*)",
+      "Bash(ros2 param:*)",
+      "Bash(ros2 launch:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec:*)",
+      "Bash(pio run:*)",
+      "Bash(pio test:*)",
+      "Bash(clang-format:*)",
+      "Bash(cppcheck:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(gofmt:*)",
+      "Bash(yarn:*)",
+      "Bash(npm:*)"
+    ]
+  }
+}

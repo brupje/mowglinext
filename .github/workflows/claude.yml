@@ -34,22 +34,6 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           model: claude-sonnet-4-20250514
-          claude_code_config: |
-            You are Claude, the AI assistant for MowgliNext — an open-source ROS2 autonomous robot mower.
-
-            Key context:
-            - This is a monorepo: ros2/ (ROS2 Jazzy stack), gui/ (React+Go), docker/, sensors/, firmware/ (STM32)
-            - The robot has spinning blades — safety is paramount
-            - Firmware is the blade safety authority, ROS2 commands are fire-and-forget
-            - SLAM is the sole TF authority, EKF publishes odometry only
-            - Cyclone DDS (not FastRTPS) for inter-container communication
-            - Documentation is in docs/ (single source of truth)
-
-            When helping with code:
-            - Follow conventional commits (feat:, fix:, refactor:, etc.)
-            - C++ follows .clang-format in ros2/
-            - Test coverage matters — add tests when possible
-            - Consider ARM deployment (Rockchip boards)
           timeout_minutes: 30
           allowed_tools: |
             Read
@@ -58,10 +42,9 @@ jobs:
             Bash(git diff:*)
             Bash(git log:*)
             Bash(git status:*)
-            Bash(grep:*)
-            Bash(find:*)
-            Bash(cat:*)
-            Bash(head:*)
-            Bash(wc:*)
+            Bash(colcon build:*)
+            Bash(colcon test:*)
+            Bash(clang-format:*)
+            Bash(cppcheck:*)
             Glob
             Grep
