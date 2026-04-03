@@ -1,0 +1,509 @@
+{
+  "type": "object",
+  "properties": {
+    "hardware_settings": {
+      "title": "Hardware",
+      "type": "object",
+      "properties": {
+        "mower_model": {
+          "type": "string",
+          "title": "Mower Model",
+          "enum": ["YardForce500", "YardForce500B", "YardForceSA650", "YardForce900ECO", "LUV1000RI", "Sabo", "CUSTOM"],
+          "default": "YardForce500",
+          "description": "The type of mower you are using."
+        },
+        "wheel_radius": {
+          "type": "number",
+          "title": "Wheel Radius",
+          "default": 0.04475,
+          "description": "Drive wheel radius in metres."
+        },
+        "wheel_track": {
+          "type": "number",
+          "title": "Wheel Track",
+          "default": 0.325,
+          "description": "Centre-to-centre distance between drive wheels in metres."
+        },
+        "wheel_x_offset": {
+          "type": "number",
+          "title": "Wheel X Offset",
+          "default": -0.18,
+          "description": "Wheel axle offset behind base_link centre in metres."
+        },
+        "ticks_per_revolution": {
+          "type": "integer",
+          "title": "Encoder Ticks per Revolution",
+          "default": 1050,
+          "description": "Encoder ticks per full wheel revolution."
+        },
+        "tool_width": {
+          "type": "number",
+          "title": "Mowing Tool Width",
+          "default": 0.18,
+          "description": "Effective cutting width in metres (2 x blade_radius)."
+        },
+        "blade_radius": {
+          "type": "number",
+          "title": "Blade Radius",
+          "default": 0.09,
+          "description": "Mowing blade radius in metres."
+        }
+      }
+    },
+    "sensor_settings": {
+      "title": "Sensors",
+      "type": "object",
+      "properties": {
+        "lidar_enabled": {
+          "type": "boolean",
+          "title": "LiDAR Enabled",
+          "default": true,
+          "description": "Enable the LiDAR sensor."
+        },
+        "lidar_x": {
+          "type": "number",
+          "title": "LiDAR X",
+          "default": 0.20,
+          "description": "LiDAR position X (forward from base_link) in metres."
+        },
+        "lidar_y": {
+          "type": "number",
+          "title": "LiDAR Y",
+          "default": 0.0,
+          "description": "LiDAR position Y (left from base_link) in metres."
+        },
+        "lidar_z": {
+          "type": "number",
+          "title": "LiDAR Z",
+          "default": 0.22,
+          "description": "LiDAR position Z (above base_link) in metres."
+        },
+        "lidar_yaw": {
+          "type": "number",
+          "title": "LiDAR Yaw",
+          "default": 0.0,
+          "description": "LiDAR heading offset in radians (rotation around Z axis)."
+        },
+        "gps_antenna_x": {
+          "type": "number",
+          "title": "GPS Antenna X",
+          "default": 0.0,
+          "description": "GPS antenna position X in metres."
+        },
+        "gps_antenna_y": {
+          "type": "number",
+          "title": "GPS Antenna Y",
+          "default": 0.0,
+          "description": "GPS antenna position Y in metres."
+        },
+        "gps_antenna_z": {
+          "type": "number",
+          "title": "GPS Antenna Z",
+          "default": 0.20,
+          "description": "GPS antenna position Z in metres."
+        },
+        "imu_x": {
+          "type": "number",
+          "title": "IMU X",
+          "default": 0.0,
+          "description": "IMU position X in metres."
+        },
+        "imu_y": {
+          "type": "number",
+          "title": "IMU Y",
+          "default": 0.0,
+          "description": "IMU position Y in metres."
+        },
+        "imu_z": {
+          "type": "number",
+          "title": "IMU Z",
+          "default": 0.095,
+          "description": "IMU position Z in metres."
+        },
+        "imu_yaw": {
+          "type": "number",
+          "title": "IMU Yaw",
+          "default": 0.0,
+          "description": "IMU heading offset in radians (rotation around Z axis)."
+        }
+      }
+    },
+    "gps_settings": {
+      "title": "GPS / Positioning",
+      "type": "object",
+      "properties": {
+        "datum_lat": {
+          "type": "number",
+          "title": "Datum Latitude",
+          "default": 0.0,
+          "description": "Map origin latitude (WGS84). Set near your docking station."
+        },
+        "datum_lon": {
+          "type": "number",
+          "title": "Datum Longitude",
+          "default": 0.0,
+          "description": "Map origin longitude (WGS84). Set near your docking station."
+        },
+        "gps_protocol": {
+          "type": "string",
+          "title": "GPS Protocol",
+          "enum": ["UBX", "NMEA"],
+          "default": "UBX",
+          "description": "Protocol used by your GPS receiver."
+        },
+        "gps_port": {
+          "type": "string",
+          "title": "GPS Port",
+          "default": "/dev/gps",
+          "description": "Serial device for the GPS receiver."
+        },
+        "gps_baudrate": {
+          "type": "integer",
+          "title": "GPS Baud Rate",
+          "default": 921600,
+          "description": "Baud rate for the GPS serial connection."
+        },
+        "gps_wait_after_undock_sec": {
+          "type": "number",
+          "title": "GPS Wait After Undock",
+          "default": 10.0,
+          "description": "Seconds to wait for RTK fix after undocking."
+        },
+        "gps_timeout_sec": {
+          "type": "number",
+          "title": "GPS Timeout",
+          "default": 5.0,
+          "description": "Pause mowing if no GPS fix for this many seconds."
+        },
+        "ntrip_enabled": {
+          "type": "boolean",
+          "title": "Enable NTRIP",
+          "default": true,
+          "description": "Enable NTRIP RTK corrections for cm-level accuracy."
+        }
+      },
+      "allOf": [{
+        "if": { "properties": { "ntrip_enabled": { "const": true } } },
+        "then": {
+          "properties": {
+            "ntrip_host": {
+              "type": "string",
+              "title": "NTRIP Host",
+              "default": "your-ntrip-caster",
+              "description": "Hostname or IP of your NTRIP caster."
+            },
+            "ntrip_port": {
+              "type": "integer",
+              "title": "NTRIP Port",
+              "default": 2101,
+              "description": "Port of your NTRIP caster."
+            },
+            "ntrip_user": {
+              "type": "string",
+              "title": "NTRIP Username",
+              "default": "",
+              "description": "NTRIP username."
+            },
+            "ntrip_password": {
+              "type": "string",
+              "title": "NTRIP Password",
+              "default": "",
+              "description": "NTRIP password."
+            },
+            "ntrip_mountpoint": {
+              "type": "string",
+              "title": "NTRIP Mountpoint",
+              "default": "",
+              "description": "NTRIP endpoint / mount point."
+            }
+          }
+        }
+      }]
+    },
+    "docking_settings": {
+      "title": "Docking",
+      "type": "object",
+      "properties": {
+        "dock_pose_x": {
+          "type": "number",
+          "title": "Dock Pose X",
+          "default": 0.0,
+          "description": "Docking station X position in the map frame (metres)."
+        },
+        "dock_pose_y": {
+          "type": "number",
+          "title": "Dock Pose Y",
+          "default": 0.0,
+          "description": "Docking station Y position in the map frame (metres)."
+        },
+        "dock_pose_yaw": {
+          "type": "number",
+          "title": "Dock Pose Yaw",
+          "default": 0.0,
+          "description": "Docking station heading in radians."
+        },
+        "undock_distance": {
+          "type": "number",
+          "title": "Undock Distance",
+          "default": 1.5,
+          "description": "Reverse distance when undocking (metres)."
+        },
+        "undock_speed": {
+          "type": "number",
+          "title": "Undock Speed",
+          "default": 0.15,
+          "description": "Reverse speed when undocking (m/s)."
+        },
+        "dock_approach_distance": {
+          "type": "number",
+          "title": "Dock Approach Distance",
+          "default": 1.0,
+          "description": "Staging point distance in front of dock (metres)."
+        },
+        "dock_max_retries": {
+          "type": "integer",
+          "title": "Dock Max Retries",
+          "default": 3,
+          "description": "Maximum docking retry attempts."
+        },
+        "dock_use_charger_detection": {
+          "type": "boolean",
+          "title": "Use Charger Detection",
+          "default": true,
+          "description": "Detect charging voltage to confirm successful dock."
+        }
+      }
+    },
+    "mowing_settings": {
+      "title": "Mowing",
+      "type": "object",
+      "properties": {
+        "mowing_enabled": {
+          "type": "boolean",
+          "title": "Enable Mowing Motor",
+          "default": true,
+          "description": "Enable mowing blade. Set false for testing without blade."
+        },
+        "mowing_speed": {
+          "type": "number",
+          "title": "Mowing Speed",
+          "default": 0.3,
+          "description": "Robot speed during mowing (m/s)."
+        },
+        "transit_speed": {
+          "type": "number",
+          "title": "Transit Speed",
+          "default": 0.4,
+          "description": "Robot speed when transiting between zones and to dock (m/s)."
+        },
+        "outline_passes": {
+          "type": "integer",
+          "title": "Outline Passes",
+          "default": 1,
+          "description": "Number of perimeter passes before fill mowing."
+        },
+        "outline_offset": {
+          "type": "number",
+          "title": "Outline Offset",
+          "default": 0.05,
+          "description": "Inward offset from recorded boundary (metres)."
+        },
+        "path_spacing": {
+          "type": "number",
+          "title": "Path Spacing",
+          "default": 0.13,
+          "description": "Spacing between mowing paths (metres). 0.13 gives overlap with 0.18 blade."
+        },
+        "headland_width": {
+          "type": "number",
+          "title": "Headland Width",
+          "default": 0.18,
+          "description": "Width of headland (turning area) in metres."
+        },
+        "min_turning_radius": {
+          "type": "number",
+          "title": "Min Turning Radius",
+          "default": 0.30,
+          "description": "Minimum turning radius for coverage path (metres)."
+        },
+        "mow_angle_offset_deg": {
+          "type": "number",
+          "title": "Mow Angle Offset",
+          "default": -1.0,
+          "description": "Mowing angle offset in degrees (-1 = auto-detect)."
+        },
+        "mow_angle_increment_deg": {
+          "type": "number",
+          "title": "Mow Angle Increment",
+          "default": 0.0,
+          "description": "Rotate mowing pattern by this many degrees each full pass."
+        },
+        "automatic_mode": {
+          "type": "integer",
+          "title": "Automatic Mode",
+          "enum": [0, 1, 2],
+          "default": 0,
+          "description": "0=Manual, 1=Semi-auto (mow once), 2=Full auto."
+        }
+      }
+    },
+    "battery_settings": {
+      "title": "Battery",
+      "type": "object",
+      "properties": {
+        "battery_full_voltage": {
+          "type": "number",
+          "title": "Full Voltage",
+          "default": 28.5,
+          "description": "Voltage at which battery is considered full."
+        },
+        "battery_empty_voltage": {
+          "type": "number",
+          "title": "Empty Voltage",
+          "default": 24.0,
+          "description": "Dock if voltage stays below this for 20s."
+        },
+        "battery_critical_voltage": {
+          "type": "number",
+          "title": "Critical Voltage",
+          "default": 23.0,
+          "description": "Immediate dock if voltage drops below this."
+        },
+        "battery_full_percent": {
+          "type": "number",
+          "title": "Full Percent",
+          "default": 95.0,
+          "description": "Resume mowing above this battery percentage."
+        },
+        "battery_low_percent": {
+          "type": "number",
+          "title": "Low Percent",
+          "default": 20.0,
+          "description": "Start heading to dock below this battery percentage."
+        },
+        "battery_critical_percent": {
+          "type": "number",
+          "title": "Critical Percent",
+          "default": 10.0,
+          "description": "Critical battery percentage."
+        }
+      }
+    },
+    "safety_settings": {
+      "title": "Safety",
+      "type": "object",
+      "properties": {
+        "motor_temp_high_c": {
+          "type": "number",
+          "title": "Motor Temp High",
+          "default": 80.0,
+          "description": "Stop blade above this motor temperature (C)."
+        },
+        "motor_temp_low_c": {
+          "type": "number",
+          "title": "Motor Temp Low",
+          "default": 40.0,
+          "description": "Resume blade below this motor temperature (C)."
+        },
+        "emergency_stop_on_tilt": {
+          "type": "boolean",
+          "title": "Emergency Stop on Tilt",
+          "default": true,
+          "description": "Emergency stop when robot tilts beyond threshold."
+        },
+        "emergency_stop_on_lift": {
+          "type": "boolean",
+          "title": "Emergency Stop on Lift",
+          "default": true,
+          "description": "Emergency stop when robot is lifted."
+        },
+        "max_obstacle_avoidance_distance": {
+          "type": "number",
+          "title": "Max Obstacle Detour",
+          "default": 2.0,
+          "description": "Maximum detour distance around obstacles (metres)."
+        }
+      }
+    },
+    "rain_settings": {
+      "title": "Rain",
+      "type": "object",
+      "properties": {
+        "rain_mode": {
+          "type": "integer",
+          "title": "Rain Mode",
+          "enum": [0, 1, 2, 3],
+          "default": 2,
+          "description": "0=Ignore, 1=Dock, 2=Dock until dry, 3=Pause automatic mode."
+        },
+        "rain_delay_minutes": {
+          "type": "number",
+          "title": "Rain Delay",
+          "default": 30.0,
+          "description": "Minutes to wait after rain stops before resuming."
+        },
+        "rain_debounce_sec": {
+          "type": "number",
+          "title": "Rain Debounce",
+          "default": 10.0,
+          "description": "Seconds of continuous rain signal before triggering."
+        }
+      }
+    },
+    "slam_settings": {
+      "title": "SLAM / Mapping",
+      "type": "object",
+      "properties": {
+        "slam_mode": {
+          "type": "string",
+          "title": "SLAM Mode",
+          "enum": ["mapping", "localization", "lifelong"],
+          "default": "lifelong",
+          "description": "SLAM operating mode."
+        },
+        "map_save_path": {
+          "type": "string",
+          "title": "Map Save Path",
+          "default": "/ros2_ws/maps/garden_map",
+          "description": "Path to save/load the SLAM map."
+        },
+        "map_save_on_dock": {
+          "type": "boolean",
+          "title": "Save Map on Dock",
+          "default": true,
+          "description": "Automatically save the SLAM map when docking."
+        }
+      }
+    },
+    "nav_settings": {
+      "title": "Navigation",
+      "type": "object",
+      "properties": {
+        "xy_goal_tolerance": {
+          "type": "number",
+          "title": "XY Goal Tolerance",
+          "default": 0.75,
+          "description": "Acceptable position error at goal (metres)."
+        },
+        "yaw_goal_tolerance": {
+          "type": "number",
+          "title": "Yaw Goal Tolerance",
+          "default": 1.0,
+          "description": "Acceptable heading error at goal (radians)."
+        },
+        "coverage_xy_tolerance": {
+          "type": "number",
+          "title": "Coverage XY Tolerance",
+          "default": 0.5,
+          "description": "Position tolerance for coverage waypoints (metres)."
+        },
+        "progress_timeout_sec": {
+          "type": "number",
+          "title": "Progress Timeout",
+          "default": 60.0,
+          "description": "Seconds without progress before recovery."
+        }
+      }
+    }
+  }
+}
