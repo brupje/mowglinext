@@ -169,7 +169,9 @@ private:
 class ExecuteFullCoveragePath : public BT::StatefulActionNode
 {
 public:
+  using Nav2Navigate = nav2_msgs::action::NavigateToPose;
   using Nav2FollowPath = nav2_msgs::action::FollowPath;
+  using NavGoalHandle = rclcpp_action::ClientGoalHandle<Nav2Navigate>;
   using FollowGoalHandle = rclcpp_action::ClientGoalHandle<Nav2FollowPath>;
 
   ExecuteFullCoveragePath(const std::string & name, const BT::NodeConfig & config)
@@ -182,15 +184,22 @@ public:
   void onHalted() override;
 
 private:
+  enum class Phase { TRANSIT_TO_START, FOLLOWING_PATH, DONE };
+
   void setBladeEnabled(bool enabled);
   bool checkStuck(const std::shared_ptr<BTContext> & ctx);
   size_t findClosestPoseIndex(const nav_msgs::msg::Path & path, double rx, double ry) const;
 
+  Phase phase_{Phase::TRANSIT_TO_START};
+
   // Action clients
+  rclcpp_action::Client<Nav2Navigate>::SharedPtr nav_client_;
   rclcpp_action::Client<Nav2FollowPath>::SharedPtr follow_client_;
   rclcpp::Client<mowgli_interfaces::srv::MowerControl>::SharedPtr blade_client_;
 
-  // Goal handle
+  // Goal handles
+  std::shared_future<NavGoalHandle::SharedPtr> nav_future_;
+  NavGoalHandle::SharedPtr nav_handle_;
   std::shared_future<FollowGoalHandle::SharedPtr> follow_future_;
   FollowGoalHandle::SharedPtr follow_handle_;
 
@@ -201,9 +210,6 @@ private:
   double last_progress_x_{0.0};
   double last_progress_y_{0.0};
 
-  /// True after the first attempt has started — enables resume-from-position
-  /// on subsequent retries instead of always starting from pose 0.
-  bool has_started_{false};
 };
 
 }  // namespace mowgli_behavior
