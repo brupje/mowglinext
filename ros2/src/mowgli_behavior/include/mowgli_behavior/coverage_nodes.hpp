@@ -174,21 +174,31 @@ public:
   using NavGoalHandle = rclcpp_action::ClientGoalHandle<Nav2Navigate>;
   using FollowGoalHandle = rclcpp_action::ClientGoalHandle<Nav2FollowPath>;
 
-  ExecuteFullCoveragePath(const std::string & name, const BT::NodeConfig & config)
-  : BT::StatefulActionNode(name, config) {}
+  ExecuteFullCoveragePath(const std::string& name, const BT::NodeConfig& config)
+      : BT::StatefulActionNode(name, config)
+  {
+  }
 
-  static BT::PortsList providedPorts() { return {}; }
+  static BT::PortsList providedPorts()
+  {
+    return {};
+  }
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
   void onHalted() override;
 
 private:
-  enum class Phase { TRANSIT_TO_START, FOLLOWING_PATH, DONE };
+  enum class Phase
+  {
+    TRANSIT_TO_START,
+    FOLLOWING_PATH,
+    DONE
+  };
 
   void setBladeEnabled(bool enabled);
-  bool checkStuck(const std::shared_ptr<BTContext> & ctx);
-  size_t findClosestPoseIndex(const nav_msgs::msg::Path & path, double rx, double ry) const;
+  bool checkStuck(const std::shared_ptr<BTContext>& ctx);
+  size_t findClosestPoseIndex(const nav_msgs::msg::Path& path, double rx, double ry) const;
 
   Phase phase_{Phase::TRANSIT_TO_START};
 
@@ -209,7 +219,6 @@ private:
   std::chrono::steady_clock::time_point last_progress_time_{};
   double last_progress_x_{0.0};
   double last_progress_y_{0.0};
-
 };
 
 }  // namespace mowgli_behavior

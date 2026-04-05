@@ -943,8 +943,9 @@ void ExecuteSwathBySwath::onHalted()
 // ExecuteFullCoveragePath — sends full F2C path to Nav2 FollowPath
 // ===========================================================================
 
-size_t ExecuteFullCoveragePath::findClosestPoseIndex(
-    const nav_msgs::msg::Path & path, double rx, double ry) const
+size_t ExecuteFullCoveragePath::findClosestPoseIndex(const nav_msgs::msg::Path& path,
+                                                     double rx,
+                                                     double ry) const
 {
   size_t best = 0;
   double best_dist = std::numeric_limits<double>::max();
@@ -985,7 +986,7 @@ void ExecuteFullCoveragePath::setBladeEnabled(bool enabled)
   blade_client_->async_send_request(req);
 }
 
-bool ExecuteFullCoveragePath::checkStuck(const std::shared_ptr<BTContext> & ctx)
+bool ExecuteFullCoveragePath::checkStuck(const std::shared_ptr<BTContext>& ctx)
 {
   double rx = 0.0, ry = 0.0;
   try
@@ -994,7 +995,7 @@ bool ExecuteFullCoveragePath::checkStuck(const std::shared_ptr<BTContext> & ctx)
     rx = transform.transform.translation.x;
     ry = transform.transform.translation.y;
   }
-  catch (const tf2::TransformException &)
+  catch (const tf2::TransformException&)
   {
     return false;
   }
@@ -1035,7 +1036,8 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
 
   if (!nav_client_->wait_for_action_server(std::chrono::seconds(5)))
   {
-    RCLCPP_ERROR(ctx->node->get_logger(), "ExecuteFullCoveragePath: /navigate_to_pose not available");
+    RCLCPP_ERROR(ctx->node->get_logger(),
+                 "ExecuteFullCoveragePath: /navigate_to_pose not available");
     return BT::NodeStatus::FAILURE;
   }
   if (!follow_client_->wait_for_action_server(std::chrono::seconds(5)))
@@ -1048,7 +1050,7 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
   last_progress_x_ = 0.0;
   last_progress_y_ = 0.0;
 
-  const auto & full_path = ctx->coverage_plan->full_path;
+  const auto& full_path = ctx->coverage_plan->full_path;
 
   // Check robot distance to the closest point on the path.
   // If close enough (< 2m), send FollowPath directly from that point.
@@ -1062,7 +1064,7 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
     ry = tf.transform.translation.y;
     have_pose = true;
   }
-  catch (const tf2::TransformException &)
+  catch (const tf2::TransformException&)
   {
   }
 
@@ -1087,7 +1089,11 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
     RCLCPP_INFO(ctx->node->get_logger(),
                 "ExecuteFullCoveragePath: robot at (%.2f, %.2f), %.2fm from path, "
                 "following from pose %zu/%zu",
-                rx, ry, closest_dist, closest_index, full_path.poses.size());
+                rx,
+                ry,
+                closest_dist,
+                closest_index,
+                full_path.poses.size());
 
     nav_msgs::msg::Path sub_path;
     sub_path.header = full_path.header;
@@ -1107,8 +1113,8 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
     }
 
     sub_path.poses.insert(sub_path.poses.end(),
-        full_path.poses.begin() + static_cast<long>(closest_index),
-        full_path.poses.end());
+                          full_path.poses.begin() + static_cast<long>(closest_index),
+                          full_path.poses.end());
 
     if (sub_path.poses.empty())
     {
@@ -1124,12 +1130,15 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
     if (send_path.poses.size() > 5000)
     {
       const double target_count = 1400.0;
-      const double total_len = [&]() {
+      const double total_len = [&]()
+      {
         double d = 0.0;
         for (size_t i = 1; i < send_path.poses.size(); ++i)
         {
-          const double dx = send_path.poses[i].pose.position.x - send_path.poses[i - 1].pose.position.x;
-          const double dy = send_path.poses[i].pose.position.y - send_path.poses[i - 1].pose.position.y;
+          const double dx =
+              send_path.poses[i].pose.position.x - send_path.poses[i - 1].pose.position.x;
+          const double dy =
+              send_path.poses[i].pose.position.y - send_path.poses[i - 1].pose.position.y;
           d += std::hypot(dx, dy);
         }
         return d;
@@ -1143,8 +1152,10 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
       double accum_dist = 0.0;
       for (size_t i = 1; i < send_path.poses.size(); ++i)
       {
-        const double dx = send_path.poses[i].pose.position.x - send_path.poses[i - 1].pose.position.x;
-        const double dy = send_path.poses[i].pose.position.y - send_path.poses[i - 1].pose.position.y;
+        const double dx =
+            send_path.poses[i].pose.position.x - send_path.poses[i - 1].pose.position.x;
+        const double dy =
+            send_path.poses[i].pose.position.y - send_path.poses[i - 1].pose.position.y;
         accum_dist += std::hypot(dx, dy);
 
         // Check heading change (detect turns between swaths)
@@ -1152,8 +1163,10 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
         if (i + 1 < send_path.poses.size())
         {
           const double dx1 = dx, dy1 = dy;
-          const double dx2 = send_path.poses[i + 1].pose.position.x - send_path.poses[i].pose.position.x;
-          const double dy2 = send_path.poses[i + 1].pose.position.y - send_path.poses[i].pose.position.y;
+          const double dx2 =
+              send_path.poses[i + 1].pose.position.x - send_path.poses[i].pose.position.x;
+          const double dy2 =
+              send_path.poses[i + 1].pose.position.y - send_path.poses[i].pose.position.y;
           const double len1 = std::hypot(dx1, dy1);
           const double len2 = std::hypot(dx2, dy2);
           if (len1 > 1e-6 && len2 > 1e-6)
@@ -1170,8 +1183,8 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
         }
       }
       // Always include the last pose
-      const auto & last = send_path.poses.back();
-      const auto & kept = thinned.poses.back();
+      const auto& last = send_path.poses.back();
+      const auto& kept = thinned.poses.back();
       if (last.pose.position.x != kept.pose.position.x ||
           last.pose.position.y != kept.pose.position.y)
       {
@@ -1179,7 +1192,10 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
       }
       RCLCPP_INFO(ctx->node->get_logger(),
                   "ExecuteFullCoveragePath: thinned %zu -> %zu poses (spacing=%.3fm, path=%.1fm)",
-                  send_path.poses.size(), thinned.poses.size(), min_spacing, total_len);
+                  send_path.poses.size(),
+                  thinned.poses.size(),
+                  min_spacing,
+                  total_len);
       send_path = thinned;
     }
 
@@ -1248,7 +1264,8 @@ BT::NodeStatus ExecuteFullCoveragePath::onRunning()
 
     if (checkStuck(ctx))
     {
-      RCLCPP_WARN(ctx->node->get_logger(), "ExecuteFullCoveragePath: stuck detected, canceling path");
+      RCLCPP_WARN(ctx->node->get_logger(),
+                  "ExecuteFullCoveragePath: stuck detected, canceling path");
       follow_client_->async_cancel_goal(follow_handle_);
       follow_handle_.reset();
       setBladeEnabled(false);
