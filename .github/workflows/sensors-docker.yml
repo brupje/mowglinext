@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - 'sensors/gps/**'
-      - 'sensors/lidar/**'
+      - 'sensors/lidar-ldlidar/**'
+      - 'sensors/lidar-rplidar/**'
+      - 'sensors/lidar-stl27l/**'
+      - 'sensors/mavros/**'
   workflow_dispatch:
     inputs:
       no-cache:
@@ -30,15 +33,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [gps, lidar]
+        image: [gps, lidar-ldlidar, lidar-rplidar, lidar-stl27l, mavros]
         arch: [linux/amd64, linux/arm64]
         include:
           - image: gps
             context: ./sensors/gps
             target: ""
-          - image: lidar
-            context: ./sensors/lidar
+          - image: lidar-ldlidar
+            context: ./sensors/lidar-ldlidar
             target: runtime
+          - image: lidar-rplidar
+            context: ./sensors/lidar-rplidar
+            target: ""
+          - image: lidar-stl27l
+            context: ./sensors/lidar-stl27l
+            target: runtime
+          - image: mavros
+            context: ./sensors/mavros
+            target: ""
           - arch: linux/amd64
             runner: ubuntu-24.04
           - arch: linux/arm64
@@ -112,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [gps, lidar]
+        image: [gps, lidar-ldlidar, lidar-rplidar, lidar-stl27l, mavros]
 
     permissions:
       contents: read

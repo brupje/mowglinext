@@ -4,6 +4,6 @@ services:
     image: ${RANGE_IMAGE:-ghcr.io/...}
     network_mode: host
     privileged: true
-    devices:
-      - ${TFLUNA_EDGE_PORT}:/dev/tfluna_edge
+    volumes:
+      - /dev:/dev
     restart: unless-stopped

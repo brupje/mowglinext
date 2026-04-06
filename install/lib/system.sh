@@ -23,6 +23,11 @@ check_apt_sources_warning() {
 run_system_update() {
   step "System update"
 
+  if ! confirm "$MSG_SYSTEM_UPDATE"; then
+    info "$MSG_SYSTEM_UPDATE_SKIPPED"
+    return 0
+  fi
+
   require_root_for "apt update"
 
   local current_pretty
@@ -37,20 +42,20 @@ run_system_update() {
   info "Running apt update..."
   $SUDO apt update
 
-  if confirm "Do you want to pin APT to the current release (${current_codename})?"; then
+  if confirm "$MSG_APT_PIN_CONFIRM (${current_codename})?"; then
     $SUDO mkdir -p /etc/apt/apt.conf.d
     echo "APT::Default-Release \"${current_codename}\";" | $SUDO tee /etc/apt/apt.conf.d/99defaultrelease > /dev/null
-    info "APT pinned to ${current_codename}"
+    info "$MSG_APT_PINNED ${current_codename}"
   else
-    info "No APT release pin applied"
+    info "$MSG_APT_NO_PIN"
   fi
 
-  if confirm "Do you want to run apt upgrade -y now?"; then
-    info "Running apt upgrade..."
+  if confirm "$MSG_APT_UPGRADE_CONFIRM"; then
+    info "$MSG_APT_UPGRADING"
     $SUDO apt upgrade -y
-    info "System upgraded"
+    info "$MSG_APT_UPGRADED"
   else
-    info "APT upgrade skipped"
+    info "$MSG_APT_UPGRADE_SKIPPED"
   fi
 }
 

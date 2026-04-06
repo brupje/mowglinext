@@ -44,6 +44,82 @@ command_exists() {
   command -v "$1" &>/dev/null
 }
 
+# List available UART devices. Returns array in UART_DEVICES.
+# Includes both existing ports and common Raspberry Pi UART ports
+# (which may not exist yet until dtoverlays are enabled and system reboots).
+detect_uart_ports() {
+  UART_DEVICES=()
+  local dev seen=""
+
+  # First: ports that actually exist right now
+  for dev in /dev/ttyAMA* /dev/ttyS* /dev/ttyUSB*; do
+    if [ -e "$dev" ]; then
+      UART_DEVICES+=("$dev")
+      seen+=" $dev "
+    fi
+  done
+
+  # Second: common Pi UART ports that will appear after dtoverlay + reboot
+  local common_ports=(/dev/ttyAMA0 /dev/ttyAMA1 /dev/ttyAMA2 /dev/ttyAMA3 /dev/ttyAMA4 /dev/ttyAMA5 /dev/ttyS0)
+  for dev in "${common_ports[@]}"; do
+    if [[ "$seen" != *" $dev "* ]]; then
+      UART_DEVICES+=("${dev} (*)")
+    fi
+  done
+}
+
+# Interactive UART port picker.
+# Usage: pick_uart_port "default_device"
+# Sets REPLY to the selected device path.
+pick_uart_port() {
+  local default_device="${1:-}"
+
+  detect_uart_ports
+
+  echo ""
+  info "$MSG_UART_DETECTING"
+
+  if [ ${#UART_DEVICES[@]} -eq 0 ]; then
+    warn "$MSG_UART_NONE_FOUND"
+    prompt "$MSG_UART_MANUAL_PROMPT" "$default_device"
+    return
+  fi
+
+  echo "$MSG_UART_AVAILABLE"
+  echo -e "  ${DIM}(*) = ${MSG_UART_AFTER_REBOOT:-available after reboot}${NC}"
+  local i=1
+  local default_idx=""
+  for dev in "${UART_DEVICES[@]}"; do
+    local clean_dev="${dev% (*)}"
+    local marker=""
+    if [ "$clean_dev" = "$default_device" ]; then
+      marker="  <--"
+      default_idx="$i"
+    fi
+    echo "  ${i}) ${dev}${marker}"
+    i=$((i + 1))
+  done
+  echo "  ${i}) $MSG_UART_MANUAL"
+
+  prompt "$MSG_UART_SELECT" "${default_idx:-1}"
+  local choice="$REPLY"
+
+  if [ "$choice" -eq "$i" ] 2>/dev/null; then
+    prompt "$MSG_UART_MANUAL_PROMPT" "$default_device"
+    return
+  fi
+
+  if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -lt "$i" ] 2>/dev/null; then
+    # Strip the " (*)" suffix for ports not yet present
+    REPLY="${UART_DEVICES[$((choice - 1))]}"
+    REPLY="${REPLY% (*)}"
+    return
+  fi
+
+  warn "$MSG_UART_INVALID"
+  REPLY="$default_device"
+}
+
 require_root_for() {
   if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"

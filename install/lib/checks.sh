@@ -22,7 +22,13 @@ check_devices() {
     local name="${dev_info#*:}"
 
     if [ -e "$dev" ]; then
-      info "$name ($dev)"
+      if [ -L "$dev" ]; then
+        local target
+        target="$(readlink -f "$dev")"
+        info "$name ($dev -> $target)"
+      else
+        info "$name ($dev)"
+      fi
     else
       fail "$name ($dev) — not found"
 
@@ -33,21 +39,49 @@ check_devices() {
           echo -e "       ${DIM}Flash with: STM32CubeProgrammer or st-flash${NC}"
           ;;
         *)
+          local uart_dev=""
+          local sensor_name=""
           if [[ "$dev" == "$GPS_PORT" ]]; then
-            add_issue "GPS not detected. Check your GPS connection and udev rules."
-            echo -e "       ${DIM}Expected port: ${GPS_PORT}${NC}"
-            echo -e "       ${DIM}Check: ls -l ${GPS_PORT}${NC}"
-            echo -e "       ${DIM}Then verify udev rules: cat /etc/udev/rules.d/50-mowgli.rules${NC}"
+            uart_dev="${GPS_UART_DEVICE:-}"
+            sensor_name="GPS"
           elif [[ "$dev" == "$LIDAR_PORT" ]]; then
-            add_issue "LiDAR device not detected. Check the selected UART/USB port and LIDAR_PORT in .env."
-            echo -e "       ${DIM}Expected port: ${LIDAR_PORT}${NC}"
-            echo -e "       ${DIM}LiDAR type: ${LIDAR_TYPE}${NC}"
-            echo -e "       ${DIM}If using a different port, edit LIDAR_PORT in .env${NC}"
+            uart_dev="${LIDAR_UART_DEVICE:-}"
+            sensor_name="LiDAR (${LIDAR_TYPE})"
+          fi
+
+          if [[ -n "$uart_dev" && ! -e "$uart_dev" ]]; then
+            # UART device itself doesn't exist — likely needs reboot for dtoverlay
+            warn "$sensor_name: UART device $uart_dev not available yet — reboot required"
+            add_issue "$sensor_name UART $uart_dev not found. Reboot to enable UART overlays, then re-check: sudo reboot"
+          elif [[ -n "$uart_dev" ]]; then
+            # UART device exists but symlink missing — udev rule issue
+            add_issue "$sensor_name symlink $dev not found but $uart_dev exists. Check udev rules: cat /etc/udev/rules.d/50-mowgli.rules"
+            echo -e "       ${DIM}Try: sudo udevadm control --reload-rules && sudo udevadm trigger${NC}"
+          else
+            add_issue "$sensor_name device $dev not detected. Check connection and .env configuration."
           fi
           ;;
       esac
     fi
   done
+
+  # Verify symlinks point to the expected UART devices
+  if [[ "${GPS_CONNECTION:-}" == "uart" && -L "${GPS_PORT}" && -n "${GPS_UART_DEVICE:-}" ]]; then
+    local gps_target
+    gps_target="$(readlink -f "$GPS_PORT")"
+    if [[ "$gps_target" != "$GPS_UART_DEVICE" ]]; then
+      warn "GPS symlink mismatch: $GPS_PORT -> $gps_target (expected $GPS_UART_DEVICE)"
+      add_issue "GPS symlink $GPS_PORT points to $gps_target instead of $GPS_UART_DEVICE. Re-run installer or fix udev rules."
+    fi
+  fi
+  if [[ "${LIDAR_CONNECTION:-}" == "uart" && -L "${LIDAR_PORT}" && -n "${LIDAR_UART_DEVICE:-}" ]]; then
+    local lidar_target
+    lidar_target="$(readlink -f "$LIDAR_PORT")"
+    if [[ "$lidar_target" != "$LIDAR_UART_DEVICE" ]]; then
+      warn "LiDAR symlink mismatch: $LIDAR_PORT -> $lidar_target (expected $LIDAR_UART_DEVICE)"
+      add_issue "LiDAR symlink $LIDAR_PORT points to $lidar_target instead of $LIDAR_UART_DEVICE. Re-run installer or fix udev rules."
+    fi
+  fi
 }
 
 check_containers() {
@@ -70,7 +104,7 @@ check_containers() {
       mowgli)    container="mowgli-ros2" ;;
       gps)       container="mowgli-gps" ;;
       lidar)     container="mowgli-lidar" ;;
-      gui)       container="openmower-gui" ;;
+      gui)       container="mowgli-gui" ;;
       mosquitto) container="mowgli-mqtt" ;;
     esac
 
@@ -84,16 +118,16 @@ check_containers() {
     else
       fail "$svc ($container) — $status"
       if [[ "$status" == "missing" ]]; then
-        add_issue "Container $container not found. Run: docker compose up -d"
+        add_issue "Container $container not found. Run: mowgli-up"
       else
-        add_issue "Container $container is $status. Check logs: docker compose logs $svc --tail 30"
+        add_issue "Container $container is $status. Check logs: docker logs $container --tail 30"
       fi
     fi
   done
 
   if docker inspect -f '{{.State.Status}}' mowgli-ros2 2>/dev/null | grep -q running; then
     local dead_nodes
-    dead_nodes=$(docker compose logs mowgli --tail 200 2>&1 \
+    dead_nodes=$(docker logs mowgli-ros2 --tail 200 2>&1 \
       | grep -oP "process has died.*cmd '([^']+)'" \
       | grep -oP "(?<=cmd ')[^']+" \
       | xargs -I{} basename {} 2>/dev/null \
@@ -104,7 +138,7 @@ check_containers() {
       echo "$dead_nodes" | while read -r node; do
         echo -e "       ${RED}$node${NC}"
       done
-      add_issue "Some ROS nodes crashed inside mowgli-ros2. Check: docker compose logs mowgli | grep 'process has died'"
+      add_issue "Some ROS nodes crashed inside mowgli-ros2. Check: docker logs mowgli-ros2 | grep 'process has died'"
     fi
   fi
 }
@@ -119,14 +153,14 @@ check_firmware() {
 
   local status_data
   status_data=$(docker exec mowgli-ros2 bash -c \
-    "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && timeout 5 ros2 topic echo /status --once 2>/dev/null" \
+    "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && timeout 5 ros2 topic echo /mowgli/hardware/status --once 2>/dev/null" \
     2>/dev/null || echo "")
 
   if [[ -z "$status_data" ]]; then
     fail "No data on /status — hardware bridge cannot communicate with Mowgli board"
     add_issue "Mowgli firmware not responding. Ensure the STM32 is flashed with Mowgli firmware and /dev/mowgli is accessible."
     echo -e "       ${DIM}Flash firmware: https://github.com/cedbossneo/Mowgli${NC}"
-    echo -e "       ${DIM}Check serial: docker compose logs mowgli | grep hardware_bridge${NC}"
+    echo -e "       ${DIM}Check serial: docker logs mowgli-ros2 | grep hardware_bridge${NC}"
   else
     local mower_status
     mower_status=$(echo "$status_data" | grep "mower_status:" | awk '{print $2}')
@@ -154,13 +188,13 @@ check_gps() {
   fi
 
   local fix_data
-  fix_data=$(docker exec mowgli-gps bash -c \
-    "source /opt/ros/jazzy/setup.bash && timeout 5 ros2 topic echo /ublox_gps_node/fix --once 2>/dev/null" \
+  fix_data=$(docker exec mowgli-ros2 bash -c \
+    "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && timeout 5 ros2 topic echo /gps/fix --once 2>/dev/null" \
     2>/dev/null || echo "")
 
   if [[ -z "$fix_data" ]]; then
-    fail "No GPS fix data on /ublox_gps_node/fix"
-    add_issue "GPS not publishing. Check: docker compose logs gps --tail 30"
+    fail "No GPS fix data on /gps/fix"
+    add_issue "GPS not publishing. Check: docker logs mowgli-gps --tail 30"
     return
   fi
 
@@ -187,7 +221,7 @@ check_gps() {
   fi
 
   local ntrip_logs
-  ntrip_logs=$(docker compose logs gps --tail 50 2>&1)
+  ntrip_logs=$(docker logs mowgli-gps --tail 50 2>&1)
 
   if echo "$ntrip_logs" | grep -q "Connected to http"; then
     local ntrip_url
@@ -213,9 +247,24 @@ check_gps() {
   datum_lat=$(grep "datum_lat:" "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" 2>/dev/null | head -1 | awk '{print $2}')
   datum_lon=$(grep "datum_lon:" "$INSTALL_DIR/config/mowgli/mowgli_robot.yaml" 2>/dev/null | head -1 | awk '{print $2}')
 
-  if [[ "$datum_lat" == "0.0" || "$datum_lon" == "0.0" || -z "$datum_lat" ]]; then
-    fail "GPS datum is 0.0/0.0 — robot position will be wrong"
-    add_issue "Set datum_lat and datum_lon in config/mowgli/mowgli_robot.yaml to your docking station coordinates"
+  if [[ "${datum_lat:-0}" == "0" || "${datum_lat:-0.0}" == "0.0" || "${datum_lon:-0}" == "0" || "${datum_lon:-0.0}" == "0.0" || -z "$datum_lat" ]]; then
+    fail "GPS datum is not set — robot position will be wrong"
+
+    # If we have a GPS fix, offer to set datum from current position
+    if [[ -n "$lat" && "$lat" != "0.0" ]]; then
+      echo -e "       ${DIM}GPS has a fix at: $lat, $lon${NC}"
+      if confirm "Set datum to current GPS position ($lat, $lon)?"; then
+        local yaml_file="$INSTALL_DIR/config/mowgli/mowgli_robot.yaml"
+        sed -i "s/datum_lat:.*/datum_lat: $lat/" "$yaml_file"
+        sed -i "s/datum_lon:.*/datum_lon: $lon/" "$yaml_file"
+        info "Datum set to $lat, $lon in $yaml_file"
+        info "Restart mowgli to apply: mowgli-restart mowgli gps"
+      else
+        add_issue "Set datum_lat and datum_lon in config/mowgli/mowgli_robot.yaml to your docking station coordinates"
+      fi
+    else
+      add_issue "Set datum_lat and datum_lon in config/mowgli/mowgli_robot.yaml to your docking station coordinates"
+    fi
   else
     info "Datum: $datum_lat, $datum_lon"
   fi
@@ -253,7 +302,7 @@ check_lidar() {
     info "LiDAR publishing on /scan ($pub_count publisher)"
   else
     fail "No publisher on /scan — LiDAR data not reaching ROS"
-    add_issue "LiDAR not publishing. Check: docker compose logs lidar --tail 20"
+    add_issue "LiDAR not publishing. Check: docker logs mowgli-lidar --tail 20"
     echo -e "       ${DIM}Expected serial port: ${LIDAR_PORT}${NC}"
   fi
 }
@@ -316,9 +365,9 @@ check_rangefinders() {
 check_gui() {
   step "Check: GUI & connectivity"
 
-  if ! docker inspect -f '{{.State.Status}}' openmower-gui 2>/dev/null | grep -q running; then
-    fail "openmower-gui not running"
-    add_issue "GUI container not running. Run: docker compose up -d gui"
+  if ! docker inspect -f '{{.State.Status}}' mowgli-gui 2>/dev/null | grep -q running; then
+    fail "mowgli-gui not running"
+    add_issue "GUI container not running. Run: mowgli-up gui"
     return
   fi
 

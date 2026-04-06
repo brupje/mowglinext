@@ -53,11 +53,18 @@ setup_env() {
   : "${TFLUNA_EDGE_UART_DEVICE:=/dev/ttyAMA2}"
   : "${TFLUNA_EDGE_BAUD:=115200}"
 
-  # Images
+  # Images — select LiDAR image based on type
   : "${MOWGLI_ROS2_IMAGE:=${MOWGLI_ROS2_IMAGE_DEFAULT}}"
   : "${GPS_IMAGE:=${GPS_IMAGE_DEFAULT}}"
-  : "${LIDAR_IMAGE:=${LIDAR_IMAGE_DEFAULT}}"
   : "${GUI_IMAGE:=${GUI_IMAGE_DEFAULT}}"
+  : "${MAVROS_IMAGE:=${MAVROS_IMAGE_DEFAULT}}"
+  if [[ -z "${LIDAR_IMAGE:-}" ]]; then
+    case "${LIDAR_TYPE:-ldlidar}" in
+      rplidar) LIDAR_IMAGE="${LIDAR_RPLIDAR_IMAGE_DEFAULT}" ;;
+      stl27l)  LIDAR_IMAGE="${LIDAR_STL27L_IMAGE_DEFAULT}" ;;
+      *)       LIDAR_IMAGE="${LIDAR_LDLIDAR_IMAGE_DEFAULT}" ;;
+    esac
+  fi
 
   touch "$env_file"
 
@@ -96,6 +103,7 @@ setup_env() {
   upsert_env_key "$env_file" "MOWGLI_ROS2_IMAGE" "$MOWGLI_ROS2_IMAGE"
   upsert_env_key "$env_file" "GPS_IMAGE" "$GPS_IMAGE"
   upsert_env_key "$env_file" "LIDAR_IMAGE" "$LIDAR_IMAGE"
+  upsert_env_key "$env_file" "MAVROS_IMAGE" "$MAVROS_IMAGE"
   upsert_env_key "$env_file" "GUI_IMAGE" "$GUI_IMAGE"
 
   info "Updated $env_file"

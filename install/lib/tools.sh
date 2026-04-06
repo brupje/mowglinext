@@ -20,11 +20,11 @@ EOF
 
 install_docker_cli_tool() {
   banner_tools
-  echo "=== Étape outils : gestionnaire Docker en ligne de commande ==="
-  echo "1) Oui, installer lazydocker (recommandé)"
-  echo "2) Oui, installer ctop (alternatif)"
-  echo "3) Non"
-  prompt "Ton choix" "3"
+  echo "=== $MSG_TOOLS_DOCKER_CLI ==="
+  echo "1) $MSG_TOOLS_DOCKER_LAZY"
+  echo "2) $MSG_TOOLS_DOCKER_CTOP"
+  echo "3) $MSG_TOOLS_NO"
+  prompt "$MSG_YOUR_CHOICE" "3"
   local docker_cli="$REPLY"
 
   case "$docker_cli" in
@@ -50,11 +50,11 @@ install_docker_cli_tool() {
 
 install_file_manager_tool() {
   banner_tools
-  echo "=== Étape outils : gestionnaire de fichiers en ligne de commande ==="
-  echo "1) Oui, installer Midnight Commander (mc)"
-  echo "2) Oui, installer ranger"
-  echo "3) Non"
-  prompt "Ton choix" "3"
+  echo "=== $MSG_TOOLS_FILE_MANAGER ==="
+  echo "1) $MSG_TOOLS_FILE_MC"
+  echo "2) $MSG_TOOLS_FILE_RANGER"
+  echo "3) $MSG_TOOLS_NO"
+  prompt "$MSG_YOUR_CHOICE" "3"
   local fileman_choice="$REPLY"
 
   require_root_for "file manager"
@@ -81,11 +81,11 @@ install_file_manager_tool() {
 
 install_debug_tools() {
   banner_tools
-  echo "=== Étape outils : outils de développement et debug ==="
-  echo "1) Tous les outils (recommandé)"
-  echo "2) Outils essentiels seulement"
-  echo "3) Aucun outil"
-  prompt "Ton choix" "2"
+  echo "=== $MSG_TOOLS_DEBUG ==="
+  echo "1) $MSG_TOOLS_DEBUG_ALL"
+  echo "2) $MSG_TOOLS_DEBUG_ESSENTIAL"
+  echo "3) $MSG_TOOLS_DEBUG_NONE"
+  prompt "$MSG_YOUR_CHOICE" "2"
   local debug_tools="$REPLY"
 
   require_root_for "debug tools"
@@ -133,34 +133,35 @@ create_helper_script() {
 
 install_mowgli_helpers() {
   banner_tools
-  echo "=== Étape outils : helpers Mowgli ==="
+  echo "=== $MSG_TOOLS_HELPERS ==="
 
-  if ! confirm "Installer les commandes helper Mowgli ?"; then
+  if ! confirm "$MSG_TOOLS_HELPERS_CONFIRM"; then
     info "No Mowgli helpers installed"
     return
   fi
 
   local project_dir="${INSTALL_DIR}"
+  local dc="docker compose --project-directory \"$project_dir\" --env-file \"$project_dir/.env\""
 
   create_helper_script "/usr/local/bin/mowgli-up" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose up -d \"\$@\""
+exec $dc up -d \"\$@\""
 
   create_helper_script "/usr/local/bin/mowgli-down" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose down \"\$@\""
+exec $dc down \"\$@\""
 
   create_helper_script "/usr/local/bin/mowgli-restart" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose restart \"\$@\""
+exec $dc restart \"\$@\""
 
   create_helper_script "/usr/local/bin/mowgli-logs" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose logs -f \"\$@\""
+exec $dc logs -f \"\$@\""
 
   create_helper_script "/usr/local/bin/mowgli-ps" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose ps"
+exec $dc ps"
 
   create_helper_script "/usr/local/bin/mowgli-check" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
@@ -168,11 +169,11 @@ exec bash ./mowglinext.sh --check"
 
   create_helper_script "/usr/local/bin/mowgli-gps-logs" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose logs -f gps"
+exec $dc logs -f gps"
 
   create_helper_script "/usr/local/bin/mowgli-lidar-logs" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-exec docker compose logs -f lidar"
+exec $dc logs -f lidar"
 
   create_helper_script "/usr/local/bin/mowgli-shell" "#!/usr/bin/env bash
 container=\"\${1:-mowgli-ros2}\"
@@ -180,7 +181,7 @@ exec docker exec -it \"\$container\" bash"
 
   create_helper_script "/usr/local/bin/mowgli-status" "#!/usr/bin/env bash
 cd \"$project_dir\" || exit 1
-docker compose ps
+$dc ps
 echo
 docker stats --no-stream 2>/dev/null || true"
 

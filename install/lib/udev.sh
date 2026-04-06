@@ -87,4 +87,34 @@ install_udev_rules() {
   fi
 
   rm -f "$tmpfile"
+
+  # Verify symlinks were created — UART devices may not exist until reboot
+  local needs_reboot=false
+
+  if [ "${GPS_CONNECTION:-usb}" = "uart" ] && [ -n "${GPS_UART_DEVICE:-}" ]; then
+    if [ ! -e "$GPS_UART_DEVICE" ]; then
+      warn "GPS UART device $GPS_UART_DEVICE does not exist yet (UART overlay needs reboot)"
+      needs_reboot=true
+    elif [ ! -e "${GPS_PORT:-/dev/gps}" ]; then
+      warn "GPS symlink ${GPS_PORT:-/dev/gps} not created — check udev rules"
+    else
+      info "GPS symlink: ${GPS_PORT:-/dev/gps} -> $(readlink -f "${GPS_PORT:-/dev/gps}")"
+    fi
+  fi
+
+  if [ "${LIDAR_ENABLED:-true}" = "true" ] && [ "${LIDAR_CONNECTION:-}" = "uart" ] && [ -n "${LIDAR_UART_DEVICE:-}" ]; then
+    if [ ! -e "$LIDAR_UART_DEVICE" ]; then
+      warn "LiDAR UART device $LIDAR_UART_DEVICE does not exist yet (UART overlay needs reboot)"
+      needs_reboot=true
+    elif [ ! -e "${LIDAR_PORT:-/dev/lidar}" ]; then
+      warn "LiDAR symlink ${LIDAR_PORT:-/dev/lidar} not created — check udev rules"
+    else
+      info "LiDAR symlink: ${LIDAR_PORT:-/dev/lidar} -> $(readlink -f "${LIDAR_PORT:-/dev/lidar}")"
+    fi
+  fi
+
+  if $needs_reboot; then
+    warn "Some UART devices require a reboot to become available"
+    add_issue "Reboot required for UART devices. Run: sudo reboot"
+  fi
 }

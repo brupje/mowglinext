@@ -7,17 +7,27 @@ configure_rangefinders() {
   TFLUNA_FRONT_UART_RULE=""
   TFLUNA_EDGE_UART_RULE=""
 
-  # If preset values exist (from web composer), skip interactive prompts
+  # If preset values exist (from web composer or CLI), skip interactive prompts
   if [[ "${PRESET_LOADED:-false}" == "true" && -n "${TFLUNA_FRONT_ENABLED:-}" ]]; then
     : "${TFLUNA_FRONT_PORT:=/dev/tfluna_front}"
-    : "${TFLUNA_FRONT_UART_DEVICE:=/dev/ttyAMA3}"
     : "${TFLUNA_FRONT_BAUD:=115200}"
     : "${TFLUNA_EDGE_ENABLED:=false}"
     : "${TFLUNA_EDGE_PORT:=/dev/tfluna_edge}"
-    : "${TFLUNA_EDGE_UART_DEVICE:=/dev/ttyAMA2}"
     : "${TFLUNA_EDGE_BAUD:=115200}"
 
-    info "Rangefinders pre-configured by web composer (skipping prompts)"
+    info "Rangefinders pre-configured (skipping prompts)"
+
+    # For enabled sensors, always let user confirm/change the UART port
+    if [[ "${TFLUNA_FRONT_ENABLED}" == "true" ]]; then
+      echo -e "\n${DIM}TF-Luna front UART:${NC}"
+      pick_uart_port "${TFLUNA_FRONT_UART_DEVICE:-/dev/ttyAMA3}"
+      TFLUNA_FRONT_UART_DEVICE="$REPLY"
+    fi
+    if [[ "${TFLUNA_EDGE_ENABLED}" == "true" ]]; then
+      echo -e "\n${DIM}TF-Luna edge UART:${NC}"
+      pick_uart_port "${TFLUNA_EDGE_UART_DEVICE:-/dev/ttyAMA2}"
+      TFLUNA_EDGE_UART_DEVICE="$REPLY"
+    fi
   else
     # Defaults based on PCB / GUI-ready
     : "${TFLUNA_FRONT_ENABLED:=false}"
@@ -31,12 +41,12 @@ configure_rangefinders() {
     : "${TFLUNA_EDGE_BAUD:=115200}"
 
     echo ""
-    echo "Configuration des capteurs TF-Luna :"
-    echo "  1) Aucun"
-    echo "  2) Front uniquement"
-    echo "  3) Edge uniquement"
-    echo "  4) Front + edge"
-    prompt "Choix" "1"
+    echo "$MSG_TFLUNA_CONFIG"
+    echo "  1) $MSG_TFLUNA_NONE"
+    echo "  2) $MSG_TFLUNA_FRONT_ONLY"
+    echo "  3) $MSG_TFLUNA_EDGE_ONLY"
+    echo "  4) $MSG_TFLUNA_FRONT_EDGE"
+    prompt "$MSG_CHOICE" "1"
     local range_choice="$REPLY"
 
     case "$range_choice" in
@@ -47,28 +57,44 @@ configure_rangefinders() {
       2)
         TFLUNA_FRONT_ENABLED="true"
         TFLUNA_EDGE_ENABLED="false"
+        echo -e "\n${DIM}TF-Luna front UART:${NC}"
+        pick_uart_port "/dev/ttyAMA3"
+        TFLUNA_FRONT_UART_DEVICE="$REPLY"
         ;;
       3)
         TFLUNA_FRONT_ENABLED="false"
         TFLUNA_EDGE_ENABLED="true"
+        echo -e "\n${DIM}TF-Luna edge UART:${NC}"
+        pick_uart_port "/dev/ttyAMA2"
+        TFLUNA_EDGE_UART_DEVICE="$REPLY"
         ;;
       4)
         TFLUNA_FRONT_ENABLED="true"
         TFLUNA_EDGE_ENABLED="true"
+        echo -e "\n${DIM}TF-Luna front UART:${NC}"
+        pick_uart_port "/dev/ttyAMA3"
+        TFLUNA_FRONT_UART_DEVICE="$REPLY"
+        echo -e "\n${DIM}TF-Luna edge UART:${NC}"
+        pick_uart_port "/dev/ttyAMA2"
+        TFLUNA_EDGE_UART_DEVICE="$REPLY"
         ;;
       *)
-        error "Choix TF-Luna invalide"
+        error "$MSG_TFLUNA_INVALID"
         return 1
         ;;
     esac
   fi
 
   # Generate udev rules based on enabled sensors
-  if [[ "${TFLUNA_FRONT_ENABLED:-false}" == "true" ]]; then
-    TFLUNA_FRONT_UART_RULE='KERNEL=="ttyAMA3", SYMLINK+="tfluna_front", MODE="0666"'
+  if [[ "${TFLUNA_FRONT_ENABLED:-false}" == "true" && -n "${TFLUNA_FRONT_UART_DEVICE:-}" ]]; then
+    local front_kernel
+    front_kernel="$(basename "$TFLUNA_FRONT_UART_DEVICE")"
+    TFLUNA_FRONT_UART_RULE="KERNEL==\"${front_kernel}\", SYMLINK+=\"tfluna_front\", MODE=\"0666\""
   fi
-  if [[ "${TFLUNA_EDGE_ENABLED:-false}" == "true" ]]; then
-    TFLUNA_EDGE_UART_RULE='KERNEL=="ttyAMA2", SYMLINK+="tfluna_edge", MODE="0666"'
+  if [[ "${TFLUNA_EDGE_ENABLED:-false}" == "true" && -n "${TFLUNA_EDGE_UART_DEVICE:-}" ]]; then
+    local edge_kernel
+    edge_kernel="$(basename "$TFLUNA_EDGE_UART_DEVICE")"
+    TFLUNA_EDGE_UART_RULE="KERNEL==\"${edge_kernel}\", SYMLINK+=\"tfluna_edge\", MODE=\"0666\""
   fi
 
   echo ""

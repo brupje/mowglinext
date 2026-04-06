@@ -14,14 +14,10 @@ x-ros2-env: &ros2-env
 services:
   lidar:
     container_name: mowgli-lidar
-    image: ${LIDAR_IMAGE:-ghcr.io/cedbossneo/mowglinext/lidar-rplidar:main}
-    build:
-      context: ../sensors/lidar-rplidar
+    image: ${LIDAR_IMAGE}
     network_mode: host
     ipc: host
     privileged: true
-    devices:
-      - ${LIDAR_PORT:-/dev/lidar}:${LIDAR_PORT:-/dev/lidar}
     environment:
       <<: *ros2-env
     command: >
@@ -31,7 +27,8 @@ services:
       frame_id:=lidar_link
       topic_name:=/scan
     volumes:
-      - ../docker/config/cyclonedds.xml:/cyclonedds.xml:ro
+      - /dev:/dev
+      - ./config/cyclonedds.xml:/cyclonedds.xml:ro
     restart: unless-stopped
     logging:
       driver: json-file

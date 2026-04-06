@@ -4,11 +4,11 @@
   # -------------------------------------------------------------------------
 services:
   gui:
-    container_name: openmower-gui
+    container_name: mowgli-gui
     image: ${GUI_IMAGE}
     labels:
       com.centurylinklabs.watchtower.enable: "true"
-      project: openmower
+      project: mowglinext
       app: gui
     network_mode: host
     privileged: true

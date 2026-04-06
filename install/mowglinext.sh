@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LIB_DIR="${SCRIPT_DIR}/lib"
 
 source "${INSTALL_LIB_DIR}/common.sh"
+source "${INSTALL_LIB_DIR}/i18n.sh"
 source "${INSTALL_LIB_DIR}/config.sh"
 source "${INSTALL_LIB_DIR}/banner.sh"
 source "${INSTALL_LIB_DIR}/progress.sh"
@@ -42,52 +43,64 @@ load_preset() {
 
 main() {
   show_banner
+  load_locale
   init_install_logs
 
   if ! $CHECK_ONLY; then
     local TOTAL_STEPS=13
 
-    # Load preset from web composer if available
+    # Language selection, load previous env, then load preset
+    select_language
+
+    # Load existing .env for defaults on re-run (preset/CLI flags override)
+    if [ -f "$INSTALL_DIR/.env" ]; then
+      set -a
+      # shellcheck disable=SC1091
+      source "$INSTALL_DIR/.env"
+      set +a
+      info "Loaded previous configuration from .env"
+    fi
+
     load_preset
 
-    progress_run 1 "$TOTAL_STEPS" "Updating system" \
-      'run_system_update'
+    progress_run_interactive 1 "$TOTAL_STEPS" "Updating system" \
+      run_system_update
 
     progress_run 2 "$TOTAL_STEPS" "Installing Docker" \
       'install_docker'
 
-    progress_run_interactive 3 "$TOTAL_STEPS" "Configuring GPS" \
-      'run_gps_configuration_step'
-
-    progress_run_interactive 4 "$TOTAL_STEPS" "Configuring LiDAR" \
-      'run_lidar_configuration_step'
-
-    progress_run_interactive 5 "$TOTAL_STEPS" "Configuring rangefinders" \
-      'run_range_configuration_step'
-
-    progress_run 6 "$TOTAL_STEPS" "Enabling UARTs" \
+    progress_run 3 "$TOTAL_STEPS" "Enabling UARTs" \
       'enable_all_platform_uarts && generate_rc_local'
+
+    progress_run_interactive 4 "$TOTAL_STEPS" "Configuring GPS" \
+      run_gps_configuration_step
+
+    progress_run_interactive 5 "$TOTAL_STEPS" "Configuring LiDAR" \
+      run_lidar_configuration_step
+
+    progress_run_interactive 6 "$TOTAL_STEPS" "Configuring rangefinders" \
+      run_range_configuration_step
 
     progress_run 7 "$TOTAL_STEPS" "Installing udev rules" \
       'install_udev_rules'
 
-    progress_run 8 "$TOTAL_STEPS" "Preparing repository" \
-      'setup_directory'
+    progress_run_interactive 8 "$TOTAL_STEPS" "Preparing repository" \
+      setup_directory
 
     progress_run 9 "$TOTAL_STEPS" "Writing environment" \
       'setup_env'
 
     progress_run_interactive 10 "$TOTAL_STEPS" "Configuring mower" \
-      'run_mower_configuration_step'
+      run_mower_configuration_step
 
     progress_run_interactive 11 "$TOTAL_STEPS" "Installing optional tools" \
-      'install_optional_tools'
+      install_optional_tools
 
     progress_run 12 "$TOTAL_STEPS" "Installing MOTD" \
       'install_motd'
 
     progress_run_live 13 "$TOTAL_STEPS" "Starting containers" \
-      'run_startup_step_live'
+      run_startup_step_live
 
   else
     if [ ! -f "$INSTALL_DIR/compose/docker-compose.base.yml" ]; then
@@ -114,4 +127,5 @@ main() {
   print_summary
 }
 
-main "$@"
+parse_args "$@"
+main
