@@ -634,6 +634,28 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// RecordResumeUndockFailure
+// ---------------------------------------------------------------------------
+
+/// Increments the resume_undock_failures counter in BTContext.
+/// Always returns SUCCESS so it can be placed inside any sequence.
+class RecordResumeUndockFailure : public BT::SyncActionNode
+{
+public:
+  RecordResumeUndockFailure(const std::string& name, const BT::NodeConfig& config)
+      : BT::SyncActionNode(name, config)
+  {
+  }
+
+  static BT::PortsList providedPorts()
+  {
+    return {};
+  }
+
+  BT::NodeStatus tick() override;
+};
+
+// ---------------------------------------------------------------------------
 // ClearCommand
 // ---------------------------------------------------------------------------
 

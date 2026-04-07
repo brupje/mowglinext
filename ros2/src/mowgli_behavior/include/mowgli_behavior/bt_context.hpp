@@ -115,6 +115,14 @@ struct BTContext
   bool raining_at_mow_start{false};
 
   // -----------------------------------------------------------------------
+  // Session-level counters (reset at mowing session start)
+  // -----------------------------------------------------------------------
+
+  /// Number of resume-undock failures this mowing session.  Prevents
+  /// infinite dock/charge/undock cycles when undocking is mechanically broken.
+  int resume_undock_failures{0};
+
+  // -----------------------------------------------------------------------
   // GPS snapshot for heading calibration during undock
   // -----------------------------------------------------------------------
   double undock_start_x{0.0};

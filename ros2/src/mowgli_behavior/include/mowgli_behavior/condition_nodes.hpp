@@ -269,6 +269,32 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// IsResumeUndockAllowed
+// ---------------------------------------------------------------------------
+
+/// Returns SUCCESS if the number of resume-undock failures this session is
+/// below the configured maximum.  Prevents infinite dock/charge/undock loops
+/// when undocking is mechanically broken.
+///
+/// Input ports:
+///   max_attempts (int, default "3") – maximum resume-undock attempts per session.
+class IsResumeUndockAllowed : public BT::ConditionNode
+{
+public:
+  IsResumeUndockAllowed(const std::string& name, const BT::NodeConfig& config)
+      : BT::ConditionNode(name, config)
+  {
+  }
+
+  static BT::PortsList providedPorts()
+  {
+    return {BT::InputPort<int>("max_attempts", 3, "Max resume-undock attempts per session")};
+  }
+
+  BT::NodeStatus tick() override;
+};
+
+// ---------------------------------------------------------------------------
 // IsChargingProgressing
 // ---------------------------------------------------------------------------
 
@@ -293,6 +319,7 @@ public:
 
 private:
   bool baseline_set_{false};
+  bool charger_failed_{false};
   float baseline_battery_{0.0f};
   std::chrono::steady_clock::time_point baseline_time_{};
 

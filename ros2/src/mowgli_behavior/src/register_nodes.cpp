@@ -35,6 +35,7 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<ReplanNeeded>("ReplanNeeded");
   factory.registerNodeType<IsBoundaryViolation>("IsBoundaryViolation");
   factory.registerNodeType<IsNewRain>("IsNewRain");
+  factory.registerNodeType<IsResumeUndockAllowed>("IsResumeUndockAllowed");
   factory.registerNodeType<IsChargingProgressing>("IsChargingProgressing");
 
   // Action nodes
@@ -57,6 +58,7 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<CalibrateHeadingFromUndock>("CalibrateHeadingFromUndock");
   factory.registerNodeType<DockRobot>("DockRobot");
   factory.registerNodeType<UndockRobot>("UndockRobot");
+  factory.registerNodeType<RecordResumeUndockFailure>("RecordResumeUndockFailure");
 
   // Coverage nodes (opennav_coverage integration)
   factory.registerNodeType<ComputeCoverage>("ComputeCoverage");

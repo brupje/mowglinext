@@ -182,6 +182,32 @@ BT::NodeStatus IsNewRain::tick()
 }
 
 // ---------------------------------------------------------------------------
+// IsResumeUndockAllowed
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus IsResumeUndockAllowed::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  int max_attempts = 3;
+  if (auto res = getInput<int>("max_attempts"))
+  {
+    max_attempts = res.value();
+  }
+
+  if (ctx->resume_undock_failures >= max_attempts)
+  {
+    RCLCPP_WARN(ctx->node->get_logger(),
+                "IsResumeUndockAllowed: %d/%d resume-undock failures, aborting session",
+                ctx->resume_undock_failures,
+                max_attempts);
+    return BT::NodeStatus::FAILURE;
+  }
+
+  return BT::NodeStatus::SUCCESS;
+}
+
+// ---------------------------------------------------------------------------
 // IsChargingProgressing
 // ---------------------------------------------------------------------------
 
@@ -189,6 +215,13 @@ BT::NodeStatus IsChargingProgressing::tick()
 {
   auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
   std::lock_guard<std::mutex> lock(ctx->context_mutex);
+
+  // Once a charger failure is detected, keep returning FAILURE until the
+  // next charging session resets the node via a fresh baseline.
+  if (charger_failed_)
+  {
+    return BT::NodeStatus::FAILURE;
+  }
 
   const auto now = std::chrono::steady_clock::now();
   const float current_battery = ctx->battery_percent;
@@ -198,6 +231,7 @@ BT::NodeStatus IsChargingProgressing::tick()
     baseline_battery_ = current_battery;
     baseline_time_ = now;
     baseline_set_ = true;
+    charger_failed_ = false;
     return BT::NodeStatus::SUCCESS;
   }
 
@@ -221,12 +255,15 @@ BT::NodeStatus IsChargingProgressing::tick()
   }
 
   // No meaningful charge increase in 30 minutes — charger problem.
+  // Set charger_failed_ so subsequent ticks fail immediately, allowing
+  // RetryUntilSuccessful to exhaust quickly instead of waiting hours.
   RCLCPP_WARN(ctx->node->get_logger(),
               "IsChargingProgressing: battery only changed %.1f%% in 30 min "
               "(%.1f%% -> %.1f%%), charger may be broken",
               increase,
               baseline_battery_,
               current_battery);
+  charger_failed_ = true;
   baseline_set_ = false;  // Reset for next charging session.
   return BT::NodeStatus::FAILURE;
 }

@@ -187,24 +187,36 @@
                     <AlwaysSuccess/>
                   </Fallback>
                   <PublishHighLevelStatus state="1" state_name="RAIN_WAITING"/>
-                  <!-- Wait for rain to stop, max ~12h -->
-                  <RetryUntilSuccessful num_attempts="1440">
-                    <Fallback>
-                      <Inverter><IsRainDetected/></Inverter>
-                      <Sequence>
-                        <WaitForDuration duration_sec="30.0"/>
-                        <AlwaysFailure/>
-                      </Sequence>
-                    </Fallback>
-                  </RetryUntilSuccessful>
+                  <!-- Wait for rain to stop, max ~12h.  If rain never clears,
+                       abort mowing cleanly instead of failing with a generic
+                       COVERAGE_FAILED status. -->
+                  <Fallback name="RainWaitOrTimeout">
+                    <RetryUntilSuccessful num_attempts="1440">
+                      <Fallback>
+                        <Inverter><IsRainDetected/></Inverter>
+                        <Sequence>
+                          <WaitForDuration duration_sec="30.0"/>
+                          <AlwaysFailure/>
+                        </Sequence>
+                      </Fallback>
+                    </RetryUntilSuccessful>
+                    <!-- Rain didn't clear in 12h — abort mowing, stay docked -->
+                    <Sequence name="RainTimeout">
+                      <PublishHighLevelStatus state="1" state_name="RAIN_TIMEOUT"/>
+                      <ClearCommand/>
+                      <AlwaysFailure/>
+                    </Sequence>
+                  </Fallback>
                   <PublishHighLevelStatus state="1" state_name="RAIN_DELAY"/>
                   <WaitForDuration duration_sec="{rain_delay_sec}"/>
-                  <!-- Rain over — undock and resume mowing -->
+                  <!-- Rain over — undock and resume mowing (if retries left) -->
+                  <IsResumeUndockAllowed max_attempts="3"/>
                   <PublishHighLevelStatus state="2" state_name="RESUMING_AFTER_RAIN"/>
                   <WaitForDuration duration_sec="1.0"/>
                   <Fallback name="RainResumeUndock">
                     <UndockRobot dock_type="simple_charging_dock"/>
                     <Sequence>
+                      <RecordResumeUndockFailure/>
                       <StopMoving/>
                       <PublishHighLevelStatus state="1" state_name="UNDOCK_FAILED"/>
                       <ClearCommand/>
@@ -228,26 +240,38 @@
                   <PublishHighLevelStatus state="1" state_name="CHARGING"/>
                   <!-- Wait for charge, max ~8 hours (960 × 30s).
                        IsChargingProgressing fails if battery hasn't increased
-                       by 1% in 30 minutes, aborting a broken charger wait. -->
-                  <RetryUntilSuccessful num_attempts="960">
-                    <Sequence>
-                      <IsChargingProgressing/>
-                      <Fallback>
-                        <IsBatteryAbove threshold="95.0"/>
-                        <Sequence>
-                          <WaitForDuration duration_sec="30.0"/>
-                          <AlwaysFailure/>
-                        </Sequence>
-                      </Fallback>
+                       by 1% in 30 minutes.  Once a charger failure is detected,
+                       subsequent ticks fail immediately so the retry exhausts
+                       in seconds rather than hours. -->
+                  <Fallback name="ChargeOrAbort">
+                    <RetryUntilSuccessful num_attempts="960">
+                      <Sequence>
+                        <IsChargingProgressing/>
+                        <Fallback>
+                          <IsBatteryAbove threshold="95.0"/>
+                          <Sequence>
+                            <WaitForDuration duration_sec="30.0"/>
+                            <AlwaysFailure/>
+                          </Sequence>
+                        </Fallback>
+                      </Sequence>
+                    </RetryUntilSuccessful>
+                    <!-- Charger broken: abort mowing, stay docked -->
+                    <Sequence name="ChargerFailed">
+                      <PublishHighLevelStatus state="1" state_name="CHARGER_FAILED"/>
+                      <ClearCommand/>
+                      <AlwaysFailure/>
                     </Sequence>
-                  </RetryUntilSuccessful>
-                  <!-- Charged — undock and verify -->
+                  </Fallback>
+                  <!-- Charged — undock if retries still available -->
+                  <IsResumeUndockAllowed max_attempts="3"/>
                   <PublishHighLevelStatus state="2" state_name="RESUMING_UNDOCKING"/>
                   <WaitForDuration duration_sec="1.0"/>
                   <Fallback name="ResumeUndockOrAbort">
                     <UndockRobot dock_type="simple_charging_dock"/>
-                    <!-- Resume undock failed — abort mowing -->
+                    <!-- Resume undock failed — record failure, abort mowing -->
                     <Sequence>
+                      <RecordResumeUndockFailure/>
                       <StopMoving/>
                       <PublishHighLevelStatus state="1" state_name="UNDOCK_FAILED"/>
                       <ClearCommand/>
