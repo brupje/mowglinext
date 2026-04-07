@@ -25,7 +25,7 @@ Nodes under test (no hardware required, use_sim_time=false):
   - gps_pose_converter_node   (mowgli_localization)
   - localization_monitor_node (mowgli_localization)
   - map_server_node           (mowgli_map)
-  - coverage_planner_node     (mowgli_coverage_planner)
+  - coverage_planner_node     (mowgli_brv_planner)
   - diagnostics_node          (mowgli_monitoring)
   - behavior_tree_node        (mowgli_behavior)
 
@@ -87,7 +87,7 @@ def generate_test_description():
     )
 
     coverage_planner = launch_ros.actions.Node(
-        package="mowgli_coverage_planner",
+        package="mowgli_brv_planner",
         executable="coverage_planner_node",
         name="coverage_planner_node",
         output="screen",

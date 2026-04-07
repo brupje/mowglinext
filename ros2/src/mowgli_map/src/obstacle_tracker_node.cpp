@@ -389,6 +389,7 @@ void ObstacleTrackerNode::on_publish_timer()
 
   std::lock_guard<std::mutex> lock(mutex_);
   promote_persistent(now_stamp);
+  merge_overlapping();
 
   // ── Build ObstacleArray (persistent obstacles only) ───────────────────────
   mowgli_interfaces::msg::ObstacleArray obstacle_array;
@@ -1002,6 +1003,86 @@ void ObstacleTrackerNode::associate_clusters(
       obs.observation_count = 1;
       obs.persistent = false;
       tracked_.push_back(std::move(obs));
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Merge overlapping obstacles
+// ─────────────────────────────────────────────────────────────────────────────
+
+void ObstacleTrackerNode::merge_overlapping()
+{
+  // Merge obstacles whose centroids are closer than the sum of their radii
+  // (plus a small margin). The merged obstacle gets a new convex hull
+  // encompassing both point sets.
+  constexpr double merge_margin = 0.10;  // extra margin for merge decision
+  bool merged_any = true;
+
+  while (merged_any)
+  {
+    merged_any = false;
+    for (size_t i = 0; i < tracked_.size(); ++i)
+    {
+      for (size_t j = i + 1; j < tracked_.size(); ++j)
+      {
+        const double dist =
+            std::hypot(tracked_[i].cx - tracked_[j].cx, tracked_[i].cy - tracked_[j].cy);
+        const double merge_dist = tracked_[i].radius + tracked_[j].radius + merge_margin;
+
+        if (dist < merge_dist)
+        {
+          // Merge j into i: combine hull points, recompute centroid and hull.
+          auto& a = tracked_[i];
+          auto& b = tracked_[j];
+
+          std::vector<std::pair<double, double>> combined = a.hull_points;
+          combined.insert(combined.end(), b.hull_points.begin(), b.hull_points.end());
+          a.hull_points = convex_hull(combined);
+
+          // Recompute centroid and radius from new hull.
+          double cx = 0.0;
+          double cy = 0.0;
+          for (const auto& [x, y] : a.hull_points)
+          {
+            cx += x;
+            cy += y;
+          }
+          cx /= static_cast<double>(a.hull_points.size());
+          cy /= static_cast<double>(a.hull_points.size());
+          a.cx = cx;
+          a.cy = cy;
+
+          double max_r = 0.0;
+          for (const auto& [x, y] : a.hull_points)
+          {
+            max_r = std::max(max_r, std::hypot(x - cx, y - cy));
+          }
+          a.radius = max_r;
+
+          // Keep the more mature obstacle's metadata.
+          a.observation_count += b.observation_count;
+          if (b.first_seen < a.first_seen)
+          {
+            a.first_seen = b.first_seen;
+          }
+          if (b.last_seen > a.last_seen)
+          {
+            a.last_seen = b.last_seen;
+          }
+          a.persistent = a.persistent || b.persistent;
+
+          RCLCPP_DEBUG(get_logger(),
+                       "Merged obstacle #%u into #%u (dist=%.2f < %.2f)",
+                       b.id, a.id, dist, merge_dist);
+
+          // Remove j
+          tracked_.erase(tracked_.begin() + static_cast<long>(j));
+          merged_any = true;
+          break;  // restart inner loop
+        }
+      }
+      if (merged_any) break;  // restart outer loop
     }
   }
 }

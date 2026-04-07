@@ -35,7 +35,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Path, OccupancyGrid, Odometry
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from sensor_msgs.msg import LaserScan
 from mowgli_interfaces.srv import HighLevelControl
 from mowgli_interfaces.msg import HighLevelStatus
@@ -101,6 +101,10 @@ class Metrics:
 
     # Speed samples per phase
     phase_speeds: dict = field(default_factory=lambda: defaultdict(list))
+
+    # Boundary violation tracking
+    boundary_violations: list = field(default_factory=list)  # [(t, x, y)]
+    boundary_violation_active: bool = False
 
     # BT state duration accumulator
     bt_state_durations: dict = field(default_factory=lambda: defaultdict(float))
@@ -181,6 +185,9 @@ class E2ETestNode(Node):
         )
         self.create_subscription(
             Twist, "/cmd_vel", self._on_cmd_vel_out, sensor_qos
+        )
+        self.create_subscription(
+            Bool, "/map_server_node/boundary_violation", self._on_boundary_violation, reliable_qos
         )
 
         # Service client
@@ -370,6 +377,21 @@ class E2ETestNode(Node):
             t - self.metrics.map_sizes[-1][0] > 5.0
         ):
             self.metrics.map_sizes.append((t, w, h, known))
+
+    def _on_boundary_violation(self, msg: Bool):
+        t = time.time() - self.metrics.start_time
+        was_active = self.metrics.boundary_violation_active
+        self.metrics.boundary_violation_active = msg.data
+        if msg.data and not was_active:
+            x, y = 0.0, 0.0
+            if self.slam_pose:
+                x, y = self.slam_pose
+            elif self.current_pose:
+                x, y = self.current_pose[0], self.current_pose[1]
+            self.metrics.boundary_violations.append((t, x, y))
+            self.get_logger().error(
+                f"[{t:.1f}s] BOUNDARY VIOLATION: robot at ({x:.2f}, {y:.2f}) is outside mowing area!"
+            )
 
     def _on_cmd_vel_out(self, msg: Twist):
         self._last_cmd_vel_x = msg.linear.x
@@ -834,12 +856,19 @@ class E2ETestNode(Node):
         min_obs = min((d for _, d in m.min_obstacle_dist), default=float("inf"))
         gps_state = m.gps_states[-1][1] if m.gps_states else "N/A"
         obs_result = self.obstacle_test_result or "PENDING"
+        boundary_str = (
+            f"VIOLATION x{len(m.boundary_violations)}" if m.boundary_violations
+            else "OK"
+        )
         report.append(
             f"  Closest obstacle: {min_obs:.2f}m  "
             f"Reroutes: {len(m.reroute_events)}  "
             f"Avoidance test: {obs_result}"
         )
-        report.append(f"  GPS: {gps_state}")
+        report.append(
+            f"  GPS: {gps_state}  "
+            f"Boundary: {boundary_str}"
+        )
 
         # ── Phase Timeline ──
         report.append(f"{'─' * 80}")
@@ -1089,6 +1118,17 @@ class E2ETestNode(Node):
             else:
                 report.append("  PASS: no collisions")
 
+        # ── Boundary Violations ──
+        report.append("\n=== Boundary Violations ===")
+        boundary_pass = True
+        if m.boundary_violations:
+            boundary_pass = False
+            report.append(f"  FAIL: {len(m.boundary_violations)} boundary violation(s)!")
+            for t_v, x_v, y_v in m.boundary_violations:
+                report.append(f"    [{t_v:.1f}s] robot at ({x_v:.2f}, {y_v:.2f})")
+        else:
+            report.append("  PASS: robot stayed within mowing area")
+
         # ── Active Obstacle Avoidance Test ──
         report.append("\n=== Active Obstacle Avoidance Test ===")
         obstacle_pass = True
@@ -1254,6 +1294,7 @@ class E2ETestNode(Node):
             ("Path tracking (median < 50cm)", path_pass),
             ("SLAM map growth", map_pass),
             ("No collisions", collision_pass),
+            ("Stayed within boundary", boundary_pass),
             ("Obstacle avoidance", obstacle_pass),
             ("Mowing efficiency >= 0.85", efficiency_pass),
             ("Area coverage >= 80%", coverage_pass),
@@ -1283,14 +1324,28 @@ def main():
         node.get_logger().info(f"Starting test in {i}s...")
         time.sleep(1)
 
-    # Pre-spawn obstacle on a coverage swath BEFORE starting mowing.
-    # Position: (5.0, -6.5) = along the first east-bound swath.
-    # Pre-spawning ensures Gazebo's GPU LiDAR can detect it.
-    if node._spawn_obstacle_at(5.0, -6.5):
+    # Pre-spawn physical obstacles in Gazebo BEFORE starting mowing.
+    # These are detected by LiDAR and trigger obstacle tracker + replanning.
+    obstacle_positions = [
+        (5.0, 0.0, "obs_center"),       # center of garden
+        (3.0, -3.0, "obs_bottom"),       # bottom-left area
+        (8.0, 2.0, "obs_right"),         # right side
+        (-2.0, 4.0, "obs_topleft"),      # top-left
+        (7.0, -4.0, "obs_bottomright"),  # bottom-right
+    ]
+    spawned_obstacles = []
+    for ox, oy, name in obstacle_positions:
+        if node._spawn_obstacle_at(ox, oy, name):
+            spawned_obstacles.append(name)
+            node.get_logger().info(f"Spawned obstacle '{name}' at ({ox}, {oy})")
+        else:
+            node.get_logger().warn(f"Failed to spawn obstacle '{name}' at ({ox}, {oy})")
+
+    if spawned_obstacles:
         node.obstacle_spawned = True
-        node.get_logger().info("Pre-spawned obstacle at (5.0, -6.5) on first coverage swath")
+        node.get_logger().info(f"Spawned {len(spawned_obstacles)} physical obstacles in Gazebo")
     else:
-        node.get_logger().warn("Could not pre-spawn obstacle — avoidance test will be skipped")
+        node.get_logger().warn("Could not spawn any obstacles — avoidance test will be skipped")
         node.obstacle_test_result = "SKIP"
 
     # Send START command
@@ -1328,9 +1383,10 @@ def main():
     except KeyboardInterrupt:
         node.get_logger().info("Test interrupted by user")
 
-    # Clean up obstacle if still present
+    # Clean up all spawned obstacles
     if node.obstacle_spawned:
-        node._remove_obstacle()
+        for name in spawned_obstacles:
+            node._remove_obstacle(name)
 
     node.print_final_report()
     node.destroy_node()

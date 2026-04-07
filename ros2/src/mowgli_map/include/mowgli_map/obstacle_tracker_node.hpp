@@ -137,6 +137,11 @@ private:
   void associate_clusters(const std::vector<std::vector<std::pair<double, double>>>& clusters,
                           const rclcpp::Time& stamp);
 
+  /// Merge overlapping tracked obstacles into single shapes.
+  /// Two obstacles merge when their centroids are closer than the sum of their radii.
+  /// Caller must hold mutex_.
+  void merge_overlapping();
+
   /// Promote obstacles meeting persistence_threshold; remove stale transients.
   /// Caller must hold mutex_.
   void promote_persistent(const rclcpp::Time& now);

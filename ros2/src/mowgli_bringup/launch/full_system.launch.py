@@ -55,7 +55,7 @@ def generate_launch_description() -> LaunchDescription:
     bringup_dir = get_package_share_directory("mowgli_bringup")
     behavior_dir = get_package_share_directory("mowgli_behavior")
     map_dir = get_package_share_directory("mowgli_map")
-    coverage_dir = get_package_share_directory("mowgli_coverage_planner")
+    coverage_dir = get_package_share_directory("mowgli_brv_planner")
     monitoring_dir = get_package_share_directory("mowgli_monitoring")
 
     # ------------------------------------------------------------------
@@ -144,7 +144,7 @@ def generate_launch_description() -> LaunchDescription:
     localization_params = os.path.join(bringup_dir, "config", "localization.yaml")
     monitoring_params = os.path.join(monitoring_dir, "config", "diagnostics.yaml")
     mqtt_params = os.path.join(monitoring_dir, "config", "mqtt_bridge.yaml")
-    coverage_params = os.path.join(coverage_dir, "config", "coverage_planner.yaml")
+    coverage_params = os.path.join(coverage_dir, "config", "brv_planner.yaml")
     # Robot-specific config (bind-mounted from mowgli-docker/config/mowgli/)
     robot_config = "/ros2_ws/config/mowgli_robot.yaml"
 
@@ -218,7 +218,7 @@ def generate_launch_description() -> LaunchDescription:
     # 5. Coverage planner (Fields2Cover v2 — replaces opennav_coverage)
     # ------------------------------------------------------------------
     coverage_planner_node = Node(
-        package="mowgli_coverage_planner",
+        package="mowgli_brv_planner",
         executable="coverage_planner_node",
         name="coverage_planner_node",
         output="screen",

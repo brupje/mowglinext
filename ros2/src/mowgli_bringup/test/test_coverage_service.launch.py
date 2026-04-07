@@ -100,7 +100,7 @@ def _send_goal(
 @pytest.mark.launch_test
 def generate_test_description():
     coverage_planner = launch_ros.actions.Node(
-        package="mowgli_coverage_planner",
+        package="mowgli_brv_planner",
         executable="coverage_planner_node",
         name="coverage_planner_node",
         output="screen",

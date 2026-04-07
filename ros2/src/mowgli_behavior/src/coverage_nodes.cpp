@@ -408,7 +408,7 @@ void ExecuteSwathBySwath::sendSwathGoal(const BTContext::Swath &swath)
 
   Nav2FollowPath::Goal goal;
   goal.path = swathToPath(swath, ctx->node);
-  goal.controller_id = "FollowCoveragePath";
+  goal.controller_id = "FollowPath";
   goal.goal_checker_id = "coverage_goal_checker";
 
   follow_handle_.reset();
@@ -1044,7 +1044,7 @@ BT::NodeStatus ExecuteFullCoveragePath::onStart()
 
     Nav2FollowPath::Goal goal;
     goal.path = send_path;
-    goal.controller_id = "FollowPath";
+    goal.controller_id = "FollowCoveragePath";
     goal.goal_checker_id = "coverage_goal_checker";
     follow_handle_.reset();
     follow_future_ = follow_client_->async_send_goal(goal);
@@ -1195,7 +1195,7 @@ bool ExecuteFullCoveragePath::resendFromCurrentPose(const std::shared_ptr<BTCont
 
   Nav2FollowPath::Goal goal;
   goal.path = sub_path;
-  goal.controller_id = "FollowPath";
+  goal.controller_id = "FollowCoveragePath";
   goal.goal_checker_id = "coverage_goal_checker";
   follow_handle_.reset();
   follow_future_ = follow_client_->async_send_goal(goal);

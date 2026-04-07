@@ -12,8 +12,9 @@ map_server_node:
 
     # Pre-defined mowing / navigation areas (OpenMower-style).
     # Parallel arrays indexed by position.  Polygon format: "x1,y1;x2,y2;..."
-    # Default: 18x13m simulation garden, 1.0m inset from walls.
+    # Simulation garden with obstacles for B-RV validation.
     area_names: ["main_mow"]
     area_polygons: ["-7.0,-6.5;11.0,-6.5;11.0,6.5;-7.0,6.5"]
     area_is_navigation: [false]
+    # No pre-defined obstacles — robot detects them via LiDAR at runtime.
     area_obstacles: [""]
