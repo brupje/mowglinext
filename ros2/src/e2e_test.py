@@ -76,6 +76,35 @@ class Metrics:
     reroute_events: list = field(default_factory=list)
     phase_results: list = field(default_factory=list)
 
+    # Per-swath deviation tracking
+    swath_deviations: dict = field(default_factory=lambda: defaultdict(list))
+    current_swath_index: int = -1
+
+    # Area coverage grid (25cm cells)
+    covered_cells: set = field(default_factory=set)
+    covered_cell_visits: dict = field(default_factory=lambda: defaultdict(int))
+    mow_area_cells: set = field(default_factory=set)
+    coverage_grid_resolution: float = 0.25
+
+    # Obstacle avoidance maneuver details
+    avoidance_maneuvers: list = field(default_factory=list)
+
+    # Time classification (seconds)
+    time_moving: float = 0.0
+    time_stopped: float = 0.0
+    time_turning: float = 0.0
+    time_recovering: float = 0.0
+
+    # Per-phase time tracking
+    phase_time_moving: dict = field(default_factory=lambda: defaultdict(float))
+    phase_time_stopped: dict = field(default_factory=lambda: defaultdict(float))
+
+    # Speed samples per phase
+    phase_speeds: dict = field(default_factory=lambda: defaultdict(list))
+
+    # BT state duration accumulator
+    bt_state_durations: dict = field(default_factory=lambda: defaultdict(float))
+
 
 class E2ETestNode(Node):
     def __init__(self):
@@ -94,6 +123,9 @@ class E2ETestNode(Node):
         self.undock_complete = False
         self.planning_complete = False
         self.dock_complete = False
+
+        # BT state duration tracking
+        self._last_bt_state_time = time.time()
 
         # Obstacle avoidance tracking
         self.obstacle_spawned = False
@@ -121,7 +153,7 @@ class E2ETestNode(Node):
         )
         self.create_subscription(
             Path,
-            "/mowgli/coverage/path",
+            "/coverage_planner_node/coverage_path",
             self._on_coverage_path,
             transient_qos,
         )
@@ -170,8 +202,14 @@ class E2ETestNode(Node):
         if not self.current_bt_state:
             self.current_bt_state = state_name
             self.metrics.bt_states.append((t, state_name))
+            self._last_bt_state_time = time.time()
             self.get_logger().info(f"[{t:.1f}s] BT initial state: {state_name}")
         elif state_name != self.current_bt_state:
+            # Accumulate duration of previous state
+            now = time.time()
+            self.metrics.bt_state_durations[self.current_bt_state] += (now - self._last_bt_state_time)
+            self._last_bt_state_time = now
+
             self.get_logger().info(f"[{t:.1f}s] BT state: {self.current_bt_state} -> {state_name}")
             prev_state = self.current_bt_state
             self.current_bt_state = state_name
@@ -179,6 +217,13 @@ class E2ETestNode(Node):
 
             # Phase transitions
             self._track_phase_transition(prev_state, state_name, t)
+
+        # Track swath progress from HighLevelStatus fields
+        self.metrics.swath_count = getattr(msg, 'total_swaths', 0)
+        self.metrics.completed_swaths = getattr(msg, 'completed_swaths', 0)
+        self.metrics.skipped_swaths = getattr(msg, 'skipped_swaths', 0)
+        if hasattr(msg, 'current_path_index') and msg.current_path_index >= 0:
+            self.metrics.current_swath_index = msg.current_path_index
 
         if state_name in ("MOWING_COMPLETE", "IDLE_DOCKED") and self.mowing_started:
             if self.current_phase == TestPhase.DOCKING or state_name == "IDLE_DOCKED":
@@ -235,8 +280,11 @@ class E2ETestNode(Node):
         self.metrics.coverage_path_poses = [
             (p.pose.position.x, p.pose.position.y) for p in msg.poses
         ]
+        self._compute_mow_area_cells()
+        planned_len = self._compute_planned_path_length()
         self.get_logger().info(
-            f"Received coverage path with {len(msg.poses)} poses"
+            f"Received coverage path: {len(msg.poses)} poses, "
+            f"{planned_len:.1f}m planned, {len(self.metrics.mow_area_cells)} area cells"
         )
 
     def _on_filtered_map(self, msg: Odometry):
@@ -258,10 +306,42 @@ class E2ETestNode(Node):
         ):
             self.metrics.robot_poses.append((t, x, y, yaw))
 
-            # Compute path deviation during mowing (FOLLOWING_PATH or MOWING state)
+            # Compute path deviation during mowing
             if self.coverage_path and self.current_phase == TestPhase.MOWING and self.slam_pose:
                 min_dist = self._min_distance_to_path(self.slam_pose[0], self.slam_pose[1])
                 self.metrics.path_deviations.append((t, min_dist))
+                # Per-swath deviation
+                idx = self.metrics.current_swath_index
+                if idx >= 0:
+                    self.metrics.swath_deviations[idx].append(min_dist)
+
+            # Area coverage grid (mark cells visited during mowing)
+            if self.current_phase == TestPhase.MOWING and self.slam_pose:
+                res = self.metrics.coverage_grid_resolution
+                gx = int(self.slam_pose[0] / res)
+                gy = int(self.slam_pose[1] / res)
+                self.metrics.covered_cells.add((gx, gy))
+                self.metrics.covered_cell_visits[(gx, gy)] += 1
+
+            # Time classification (0.5s intervals)
+            dt = 0.5
+            phase_name = self.current_phase.value
+            if self.metrics.cmd_vels:
+                _, lin_x, ang_z = self.metrics.cmd_vels[-1]
+                speed = abs(lin_x)
+                if self.current_bt_state == "RECOVERING":
+                    self.metrics.time_recovering += dt
+                elif speed < 0.01 and abs(ang_z) < 0.01:
+                    self.metrics.time_stopped += dt
+                    self.metrics.phase_time_stopped[phase_name] += dt
+                elif abs(ang_z) > 0.3:
+                    self.metrics.time_turning += dt
+                else:
+                    self.metrics.time_moving += dt
+                    self.metrics.phase_time_moving[phase_name] += dt
+                # Track speeds per phase
+                if speed > 0.01:
+                    self.metrics.phase_speeds[phase_name].append(speed)
 
     def _on_scan(self, msg: LaserScan):
         self._latest_scan = msg
@@ -330,6 +410,83 @@ class E2ETestNode(Node):
         s = self._latest_scan
         valid = [r for r in s.ranges if r > s.range_min and r < s.range_max]
         return min(valid) if valid else float('inf')
+
+    def _compute_planned_path_length(self) -> float:
+        """Sum of Euclidean distances between consecutive coverage path poses."""
+        poses = self.metrics.coverage_path_poses
+        if len(poses) < 2:
+            return 0.0
+        total = 0.0
+        for i in range(1, len(poses)):
+            dx = poses[i][0] - poses[i - 1][0]
+            dy = poses[i][1] - poses[i - 1][1]
+            total += math.sqrt(dx * dx + dy * dy)
+        return total
+
+    def _compute_actual_mowing_distance(self) -> float:
+        """Distance traveled during MOWING phase only."""
+        mow_start = None
+        mow_end = None
+        for ts, st in self.metrics.bt_states:
+            if st == "MOWING" and mow_start is None:
+                mow_start = ts
+            elif mow_start is not None and st in (
+                "MOWING_COMPLETE", "RETURNING_HOME", "COVERAGE_FAILED_DOCKING",
+            ):
+                mow_end = ts
+                break
+        if mow_start is None:
+            return 0.0
+        if mow_end is None:
+            mow_end = time.time() - self.metrics.start_time
+
+        poses = [
+            (t, x, y)
+            for t, x, y, _ in self.metrics.robot_poses
+            if mow_start <= t <= mow_end
+        ]
+        dist = 0.0
+        for i in range(1, len(poses)):
+            dx = poses[i][1] - poses[i - 1][1]
+            dy = poses[i][2] - poses[i - 1][2]
+            dist += math.sqrt(dx * dx + dy * dy)
+        return dist
+
+    def _compute_mow_area_cells(self):
+        """Rasterize the planned coverage path into grid cells."""
+        res = self.metrics.coverage_grid_resolution
+        cells = set()
+        poses = self.metrics.coverage_path_poses
+        for i in range(1, len(poses)):
+            ax, ay = poses[i - 1]
+            bx, by = poses[i]
+            dx, dy = bx - ax, by - ay
+            seg_len = math.sqrt(dx * dx + dy * dy)
+            steps = max(1, int(seg_len / (res * 0.5)))
+            for s in range(steps + 1):
+                frac = s / steps
+                px = ax + frac * dx
+                py = ay + frac * dy
+                cells.add((int(px / res), int(py / res)))
+        self.metrics.mow_area_cells = cells
+
+    def _deviation_histogram(self, devs: list) -> str:
+        """Return ASCII histogram of deviation buckets."""
+        buckets = [0.05, 0.10, 0.20, 0.30, 0.50, 1.00, float("inf")]
+        labels = ["<5cm", "5-10cm", "10-20cm", "20-30cm", "30-50cm", "50cm-1m", ">1m"]
+        counts = [0] * len(buckets)
+        for d in devs:
+            for i, b in enumerate(buckets):
+                if d <= b:
+                    counts[i] += 1
+                    break
+        total = len(devs) or 1
+        lines = []
+        for label, count in zip(labels, counts):
+            pct = count / total * 100
+            bar = "#" * int(pct / 2)
+            lines.append(f"    {label:>8s} | {bar:<50s} {count:4d} ({pct:.1f}%)")
+        return "\n".join(lines)
 
     def _spawn_obstacle_at(self, ox: float, oy: float, name: str = "e2e_obstacle") -> bool:
         """Spawn a cylinder obstacle using blocking create service."""
@@ -454,7 +611,13 @@ class E2ETestNode(Node):
                 break
 
         # Evaluate
-        if robot_stopped and robot_resumed:
+        if robot_stopped and robot_resumed and stop_time is not None and resume_time is not None:
+            self.metrics.avoidance_maneuvers.append({
+                "start_time": stop_time,
+                "end_time": resume_time,
+                "time_cost": resume_time - stop_time,
+                "closest_approach": closest_approach,
+            })
             self.obstacle_test_result = "PASS"
             self.get_logger().info(
                 f"=== OBSTACLE AVOIDANCE TEST: PASS — robot stopped and navigated around "
@@ -492,72 +655,244 @@ class E2ETestNode(Node):
         self.get_logger().error("Failed to send START command")
         return False
 
+    def _progress_bar(self, pct: float, width: int = 30) -> str:
+        filled = int(pct / 100 * width)
+        return f"[{'█' * filled}{'░' * (width - filled)}] {pct:.1f}%"
+
+    def _speed_stats(self, phase: str) -> str:
+        speeds = self.metrics.phase_speeds.get(phase, [])
+        if not speeds:
+            return "n/a"
+        return (
+            f"avg={sum(speeds)/len(speeds):.2f} "
+            f"min={min(speeds):.2f} max={max(speeds):.2f} m/s"
+        )
+
+    def _overlap_stats(self) -> tuple:
+        """Returns (overlap_pct, wasted_visits) — cells visited >1 time."""
+        visits = self.metrics.covered_cell_visits
+        if not visits:
+            return 0.0, 0
+        multi = sum(1 for v in visits.values() if v > 1)
+        wasted = sum(v - 1 for v in visits.values() if v > 1)
+        overlap_pct = multi / len(visits) * 100 if visits else 0.0
+        return overlap_pct, wasted
+
     def _periodic_report(self):
         t = time.time() - self.metrics.start_time
-        devs = self.metrics.path_deviations
-        poses = self.metrics.robot_poses
+        m = self.metrics
+        devs = m.path_deviations
+        poses = m.robot_poses
 
-        report = [f"\n{'='*70}", f"E2E STATUS — t={t:.0f}s  Phase: {self.current_phase.value}", f"{'='*70}"]
+        report = [
+            f"\n{'═' * 80}",
+            f"  E2E LIVE DASHBOARD  t={t:.0f}s ({t/60:.1f}min)  "
+            f"Phase: {self.current_phase.value}  BT: {self.current_bt_state}",
+            f"{'═' * 80}",
+        ]
 
-        report.append(f"BT state: {self.current_bt_state}")
-        report.append(f"State transitions: {len(self.metrics.bt_states)}")
-
+        # ── Robot State ──
+        speed = abs(m.cmd_vels[-1][1]) if m.cmd_vels else 0.0
+        ang = abs(m.cmd_vels[-1][2]) if m.cmd_vels else 0.0
         if self.current_pose:
             x, y, yaw = self.current_pose
-            report.append(f"Robot pose: ({x:.2f}, {y:.2f}, yaw={math.degrees(yaw):.1f})")
-
-        if devs:
-            recent = [d for _, d in devs[-20:]]
-            avg_dev = sum(recent) / len(recent)
-            max_dev = max(recent)
-            report.append(f"Path deviation: avg={avg_dev:.3f}m  max={max_dev:.3f}m (last 20)")
-
-        report.append(f"Coverage path: {self.metrics.coverage_path_len} poses")
-
-        if len(poses) > 1:
-            dist = sum(
-                math.sqrt((poses[i][1]-poses[i-1][1])**2 + (poses[i][2]-poses[i-1][2])**2)
-                for i in range(1, len(poses))
+            report.append(
+                f"  Robot: ({x:.2f}, {y:.2f}, {math.degrees(yaw):.1f}°)  "
+                f"v={speed:.2f}m/s  ω={ang:.2f}rad/s"
             )
-            report.append(f"Distance traveled: {dist:.1f}m")
 
-        if self.metrics.reroute_events:
-            report.append(f"Reroute events: {len(self.metrics.reroute_events)}")
+        # ── Mowing Progress ──
+        report.append(f"{'─' * 80}")
+        report.append("  MOWING PROGRESS")
+        swath_pct = (m.completed_swaths / m.swath_count * 100) if m.swath_count > 0 else 0.0
+        report.append(
+            f"  Swaths:  {self._progress_bar(swath_pct)}  "
+            f"{m.completed_swaths}/{m.swath_count} done, {m.skipped_swaths} skipped"
+        )
+        area_pct = (
+            len(m.covered_cells) / len(m.mow_area_cells) * 100
+            if m.mow_area_cells else 0.0
+        )
+        report.append(
+            f"  Area:    {self._progress_bar(area_pct)}  "
+            f"{len(m.covered_cells)}/{len(m.mow_area_cells)} cells"
+        )
 
-        report.append(f"{'='*70}")
+        # ETA based on swath completion rate
+        if m.completed_swaths > 0 and m.swath_count > 0:
+            mow_phases = [pr for pr in m.phase_results if pr.name == "MOWING"]
+            mow_elapsed = t - self.phase_start_time if self.current_phase == TestPhase.MOWING else 0
+            if mow_elapsed > 10:
+                rate = m.completed_swaths / mow_elapsed
+                remaining = m.swath_count - m.completed_swaths
+                eta = remaining / rate if rate > 0 else 0
+                report.append(f"  ETA:     ~{eta:.0f}s ({eta/60:.1f}min) remaining")
+
+        # ── Precision (Path Tracking) ──
+        report.append(f"{'─' * 80}")
+        report.append("  PRECISION")
+        if devs:
+            all_d = [d for _, d in devs]
+            recent = [d for _, d in devs[-20:]]
+            sorted_d = sorted(all_d)
+            p50 = sorted_d[len(sorted_d) // 2]
+            p95 = sorted_d[min(int(len(sorted_d) * 0.95), len(sorted_d) - 1)]
+            p99 = sorted_d[min(int(len(sorted_d) * 0.99), len(sorted_d) - 1)]
+            within_10cm = sum(1 for d in all_d if d <= 0.10) / len(all_d) * 100
+            within_30cm = sum(1 for d in all_d if d <= 0.30) / len(all_d) * 100
+            report.append(
+                f"  Deviation: P50={p50:.3f}m  P95={p95:.3f}m  P99={p99:.3f}m  max={max(all_d):.3f}m"
+            )
+            report.append(
+                f"  Recent(20): avg={sum(recent)/len(recent):.3f}m  max={max(recent):.3f}m"
+            )
+            report.append(
+                f"  Within 10cm: {within_10cm:.0f}%   Within 30cm: {within_30cm:.0f}%"
+            )
+            # Show grade
+            if p50 < 0.10:
+                grade = "A+ (excellent)"
+            elif p50 < 0.20:
+                grade = "A (very good)"
+            elif p50 < 0.30:
+                grade = "B (good)"
+            elif p50 < 0.50:
+                grade = "C (acceptable)"
+            else:
+                grade = "D (needs tuning)"
+            report.append(f"  Grade: {grade}")
+
+        # ── Efficiency ──
+        report.append(f"{'─' * 80}")
+        report.append("  EFFICIENCY")
+        planned = self._compute_planned_path_length()
+        actual = self._compute_actual_mowing_distance()
+        if actual > 0 and planned > 0:
+            eff = planned / actual
+            overhead = (actual - planned) / planned * 100
+            report.append(
+                f"  Path efficiency: {eff:.3f} (1.0=optimal)  "
+                f"Overhead: {overhead:+.1f}%"
+            )
+            report.append(
+                f"  Distance: {actual:.1f}m traveled / {planned:.1f}m planned"
+            )
+        overlap_pct, wasted = self._overlap_stats()
+        if self.metrics.covered_cell_visits:
+            report.append(
+                f"  Overlap: {overlap_pct:.1f}% cells revisited, "
+                f"{wasted} wasted visits"
+            )
+        # Area per meter: how much new area covered per meter traveled
+        if actual > 0 and m.covered_cells:
+            cell_area = m.coverage_grid_resolution ** 2
+            area_m2 = len(m.covered_cells) * cell_area
+            report.append(
+                f"  Area yield: {area_m2:.1f}m² covered in {actual:.0f}m "
+                f"({area_m2/actual:.2f} m²/m)"
+            )
+
+        # ── Time Breakdown ──
+        report.append(f"{'─' * 80}")
+        report.append("  TIME BREAKDOWN")
+        total_t = m.time_moving + m.time_stopped + m.time_turning + m.time_recovering
+        if total_t > 0:
+            mv_pct = m.time_moving / total_t * 100
+            st_pct = m.time_stopped / total_t * 100
+            tn_pct = m.time_turning / total_t * 100
+            rc_pct = m.time_recovering / total_t * 100
+            report.append(
+                f"  Moving:     {m.time_moving:6.0f}s ({mv_pct:5.1f}%)  "
+                f"{'▓' * int(mv_pct / 2)}"
+            )
+            report.append(
+                f"  Stopped:    {m.time_stopped:6.0f}s ({st_pct:5.1f}%)  "
+                f"{'░' * int(st_pct / 2)}"
+            )
+            report.append(
+                f"  Turning:    {m.time_turning:6.0f}s ({tn_pct:5.1f}%)  "
+                f"{'▒' * int(tn_pct / 2)}"
+            )
+            report.append(
+                f"  Recovering: {m.time_recovering:6.0f}s ({rc_pct:5.1f}%)  "
+                f"{'▒' * int(rc_pct / 2)}"
+            )
+            productive = mv_pct + tn_pct
+            report.append(f"  Productive time: {productive:.1f}%  Wasted: {st_pct + rc_pct:.1f}%")
+
+        # ── Speed Stats ──
+        report.append(f"{'─' * 80}")
+        report.append("  SPEED STATS")
+        for phase in ["UNDOCKING", "MOWING", "DOCKING"]:
+            speeds = m.phase_speeds.get(phase, [])
+            if speeds:
+                report.append(f"  {phase:12s}: {self._speed_stats(phase)}")
+
+        # ── Obstacle & Safety ──
+        report.append(f"{'─' * 80}")
+        report.append("  OBSTACLES & SAFETY")
+        min_obs = min((d for _, d in m.min_obstacle_dist), default=float("inf"))
+        gps_state = m.gps_states[-1][1] if m.gps_states else "N/A"
+        obs_result = self.obstacle_test_result or "PENDING"
+        report.append(
+            f"  Closest obstacle: {min_obs:.2f}m  "
+            f"Reroutes: {len(m.reroute_events)}  "
+            f"Avoidance test: {obs_result}"
+        )
+        report.append(f"  GPS: {gps_state}")
+
+        # ── Phase Timeline ──
+        report.append(f"{'─' * 80}")
+        report.append("  PHASE TIMELINE")
+        for pr in m.phase_results:
+            status = "✓" if pr.passed else "✗"
+            report.append(f"  {status} {pr.name:12s} {pr.duration_sec:6.1f}s  {pr.details}")
+        # Current phase
+        if self.current_phase not in (TestPhase.WAITING, TestPhase.COMPLETE):
+            elapsed = t - self.phase_start_time
+            report.append(f"  ▶ {self.current_phase.value:12s} {elapsed:6.1f}s  (in progress)")
+
+        report.append(f"{'═' * 80}")
         self.get_logger().info("\n".join(report))
 
     def print_final_report(self):
         t = time.time() - self.metrics.start_time
-        devs = self.metrics.path_deviations
-        maps = self.metrics.map_sizes
-        gps = self.metrics.gps_states
-        obs = self.metrics.min_obstacle_dist
-        poses = self.metrics.robot_poses
+        m = self.metrics
+        devs = m.path_deviations
+        maps = m.map_sizes
+        gps = m.gps_states
+        obs = m.min_obstacle_dist
+        poses = m.robot_poses
+
+        # Finalize BT state duration tracking
+        if self.current_bt_state:
+            now = time.time()
+            m.bt_state_durations[self.current_bt_state] += (now - self._last_bt_state_time)
+            self._last_bt_state_time = now
 
         report = [
-            f"\n{'#'*70}",
+            f"\n{'#' * 70}",
             f"FINAL E2E SIMULATION VALIDATION REPORT",
-            f"Duration: {t:.0f}s ({t/60:.1f} min)",
-            f"{'#'*70}",
+            f"Duration: {t:.0f}s ({t / 60:.1f} min)",
+            f"{'#' * 70}",
         ]
 
         # ── Phase Results ──
         report.append("\n=== PHASE RESULTS ===")
         all_phases_pass = True
-        for pr in self.metrics.phase_results:
+        for pr in m.phase_results:
             status = "PASS" if pr.passed else "FAIL"
             report.append(f"  {pr.name:20s} {status} ({pr.duration_sec:.1f}s) — {pr.details}")
             if not pr.passed:
                 all_phases_pass = False
 
-        if not self.metrics.phase_results:
+        if not m.phase_results:
             report.append("  No phase transitions recorded!")
             all_phases_pass = False
 
         # ── BT State History ──
         report.append("\n=== Behavior Tree State History ===")
-        for ts, st in self.metrics.bt_states:
+        for ts, st in m.bt_states:
             report.append(f"  [{ts:7.1f}s] {st}")
 
         # ── Path Tracking Quality ──
@@ -567,7 +902,7 @@ class E2ETestNode(Node):
             all_devs = [d for _, d in devs]
             avg = sum(all_devs) / len(all_devs)
             sorted_devs = sorted(all_devs)
-            p50 = sorted_devs[int(len(sorted_devs) * 0.50)]
+            p50 = sorted_devs[len(sorted_devs) // 2]
             p95 = sorted_devs[min(int(len(sorted_devs) * 0.95), len(sorted_devs) - 1)]
             max_d = max(all_devs)
             report.append(f"  Samples:     {len(all_devs)}")
@@ -576,18 +911,143 @@ class E2ETestNode(Node):
             report.append(f"  P95 error:   {p95:.4f} m")
             report.append(f"  Max error:   {max_d:.4f} m")
             if p50 < 0.30:
-                report.append(f"  PASS: median deviation < 30cm (excellent)")
+                report.append("  PASS: median deviation < 30cm (excellent)")
             elif p50 < 0.50:
-                report.append(f"  PASS: median deviation < 50cm (acceptable)")
+                report.append("  PASS: median deviation < 50cm (acceptable)")
             elif p50 < 1.0:
-                report.append(f"  WARN: median deviation 50cm-1m (needs tuning)")
+                report.append("  WARN: median deviation 50cm-1m (needs tuning)")
                 path_pass = False
             else:
-                report.append(f"  FAIL: median deviation > 1m")
+                report.append("  FAIL: median deviation > 1m")
                 path_pass = False
         else:
             report.append("  No path deviation data collected")
             path_pass = False
+
+        # ── Per-Swath Deviation ──
+        report.append("\n=== Per-Swath Deviation ===")
+        if m.swath_deviations:
+            best_swath = (-1, float("inf"))
+            worst_swath = (-1, 0.0)
+            for idx in sorted(m.swath_deviations.keys()):
+                sd = m.swath_deviations[idx]
+                if not sd:
+                    continue
+                s_avg = sum(sd) / len(sd)
+                s_sorted = sorted(sd)
+                s_p95 = s_sorted[min(int(len(s_sorted) * 0.95), len(s_sorted) - 1)]
+                s_max = max(sd)
+                report.append(
+                    f"  Swath {idx:3d}: n={len(sd):4d}  "
+                    f"mean={s_avg:.3f}m  P95={s_p95:.3f}m  max={s_max:.3f}m"
+                )
+                if s_avg < best_swath[1]:
+                    best_swath = (idx, s_avg)
+                if s_avg > worst_swath[1]:
+                    worst_swath = (idx, s_avg)
+            if best_swath[0] >= 0:
+                report.append(f"  Best swath:  #{best_swath[0]} (mean={best_swath[1]:.3f}m)")
+                report.append(f"  Worst swath: #{worst_swath[0]} (mean={worst_swath[1]:.3f}m)")
+        else:
+            report.append("  No per-swath data (swath index not reported)")
+
+        # ── Deviation Over Time (quartile trend) ──
+        report.append("\n=== Deviation Over Time ===")
+        if devs and len(devs) >= 4:
+            all_devs = [d for _, d in devs]
+            q_size = len(all_devs) // 4
+            quartiles = [
+                all_devs[: q_size],
+                all_devs[q_size: 2 * q_size],
+                all_devs[2 * q_size: 3 * q_size],
+                all_devs[3 * q_size:],
+            ]
+            q_means = []
+            for i, q in enumerate(quartiles, 1):
+                qm = sum(q) / len(q) if q else 0.0
+                q_means.append(qm)
+                report.append(f"  Q{i} ({(i-1)*25}-{i*25}%): mean={qm:.4f}m")
+            if q_means[-1] > q_means[0] * 1.5:
+                report.append("  Trend: DEGRADING (deviation increasing over time)")
+            elif q_means[-1] < q_means[0] * 0.7:
+                report.append("  Trend: IMPROVING (deviation decreasing)")
+            else:
+                report.append("  Trend: STABLE")
+
+        # ── Deviation Distribution ──
+        report.append("\n=== Deviation Distribution ===")
+        if devs:
+            report.append(self._deviation_histogram([d for _, d in devs]))
+
+        # ── Mowing Efficiency ──
+        report.append("\n=== Mowing Efficiency ===")
+        planned_len = self._compute_planned_path_length()
+        actual_mow_dist = self._compute_actual_mowing_distance()
+        efficiency_pass = True
+        if planned_len > 0 and actual_mow_dist > 0:
+            efficiency = planned_len / actual_mow_dist
+            overhead_pct = (actual_mow_dist - planned_len) / planned_len * 100
+            report.append(f"  Planned path length:  {planned_len:.1f} m")
+            report.append(f"  Actual mowing dist:   {actual_mow_dist:.1f} m")
+            report.append(f"  Efficiency ratio:     {efficiency:.3f} (planned/actual, 1.0 = optimal)")
+            report.append(f"  Overhead:             {overhead_pct:+.1f}% extra distance")
+            if efficiency >= 0.85:
+                report.append("  PASS: efficiency >= 0.85")
+            else:
+                report.append("  FAIL: efficiency < 0.85")
+                efficiency_pass = False
+        else:
+            report.append("  No mowing distance data")
+            efficiency_pass = False
+
+        # ── Area Coverage ──
+        report.append("\n=== Area Coverage ===")
+        coverage_pass = True
+        if m.mow_area_cells:
+            covered = len(m.covered_cells)
+            total = len(m.mow_area_cells)
+            pct = covered / total * 100 if total > 0 else 0.0
+            uncovered = total - covered
+            cell_area = m.coverage_grid_resolution ** 2
+            report.append(f"  Grid resolution:      {m.coverage_grid_resolution} m")
+            report.append(f"  Planned area cells:   {total} ({total * cell_area:.1f} m²)")
+            report.append(f"  Covered cells:        {covered} ({covered * cell_area:.1f} m²)")
+            report.append(f"  Coverage:             {pct:.1f}%")
+            report.append(f"  Uncovered cells:      {uncovered} ({uncovered * cell_area:.1f} m²)")
+            if pct >= 80.0:
+                report.append("  PASS: coverage >= 80%")
+            else:
+                report.append("  FAIL: coverage < 80%")
+                coverage_pass = False
+        else:
+            report.append("  No coverage path data")
+            coverage_pass = False
+
+        # ── Overlap / Redundancy Analysis ──
+        report.append("\n=== Overlap Analysis ===")
+        if m.covered_cell_visits:
+            visit_counts = list(m.covered_cell_visits.values())
+            single = sum(1 for v in visit_counts if v == 1)
+            double = sum(1 for v in visit_counts if v == 2)
+            triple_plus = sum(1 for v in visit_counts if v >= 3)
+            wasted = sum(v - 1 for v in visit_counts if v > 1)
+            total_visits = sum(visit_counts)
+            overlap_pct = (1 - single / len(visit_counts)) * 100 if visit_counts else 0
+            report.append(f"  Unique cells:         {len(visit_counts)}")
+            report.append(f"  Total visits:         {total_visits}")
+            report.append(f"  Single-pass:          {single} ({single/len(visit_counts)*100:.1f}%)")
+            report.append(f"  Double-pass:          {double}")
+            report.append(f"  Triple+ pass:         {triple_plus}")
+            report.append(f"  Wasted visits:        {wasted} ({wasted/total_visits*100:.1f}% waste)")
+            report.append(f"  Overlap ratio:        {overlap_pct:.1f}%")
+            if overlap_pct < 15:
+                report.append("  PASS: low overlap (<15%)")
+            elif overlap_pct < 30:
+                report.append("  WARN: moderate overlap (15-30%)")
+            else:
+                report.append("  FAIL: high overlap (>30%) — path may need optimization")
+        else:
+            report.append("  No overlap data")
 
         # ── SLAM Map Growth ──
         report.append("\n=== SLAM Map Growth ===")
@@ -612,7 +1072,7 @@ class E2ETestNode(Node):
         report.append(f"  NORMAL transitions:   {normal_count}")
         report.append(f"  DEGRADED transitions: {degraded_count}")
 
-        # ── Obstacle Avoidance ──
+        # ── Obstacle Proximity ──
         report.append("\n=== Obstacle Proximity ===")
         collision_pass = True
         if obs:
@@ -627,7 +1087,7 @@ class E2ETestNode(Node):
                 report.append(f"  FAIL: {collision_events} potential collision(s)")
                 collision_pass = False
             else:
-                report.append(f"  PASS: no collisions")
+                report.append("  PASS: no collisions")
 
         # ── Active Obstacle Avoidance Test ──
         report.append("\n=== Active Obstacle Avoidance Test ===")
@@ -649,32 +1109,156 @@ class E2ETestNode(Node):
         else:
             report.append("  NOT RUN: test did not reach mowing phase")
 
-        # ── Reroute Events ──
-        report.append("\n=== Reroute Events ===")
-        report.append(f"  Total reroute events: {len(self.metrics.reroute_events)}")
-        for ts, event in self.metrics.reroute_events:
-            report.append(f"  [{ts:7.1f}s] {event}")
+        # ── Obstacle Avoidance Detail ──
+        report.append("\n=== Obstacle Avoidance Detail ===")
+        if m.avoidance_maneuvers:
+            total_cost = 0.0
+            for i, man in enumerate(m.avoidance_maneuvers, 1):
+                tc = man["time_cost"]
+                total_cost += tc
+                report.append(
+                    f"  Maneuver #{i}: time_cost={tc:.1f}s  "
+                    f"closest={man.get('closest_approach', 0):.2f}m"
+                )
+            report.append(f"  Total avoidance time cost: {total_cost:.1f}s")
+        else:
+            report.append("  No avoidance maneuvers recorded")
+
+        # ── Reroute / Dynamic Replanning ──
+        report.append("\n=== Dynamic Replanning ===")
+        report.append(f"  Total reroute events: {len(m.reroute_events)}")
+        # Pair RECOVERING enter/exit to compute replan durations
+        recovering_start = None
+        replan_durations = []
+        for ts, st in m.bt_states:
+            if st == "RECOVERING":
+                recovering_start = ts
+            elif recovering_start is not None and st != "RECOVERING":
+                replan_durations.append(ts - recovering_start)
+                recovering_start = None
+        if replan_durations:
+            for i, dur in enumerate(replan_durations, 1):
+                report.append(f"  Replan #{i}: {dur:.1f}s in recovery")
+            avg_replan = sum(replan_durations) / len(replan_durations)
+            report.append(f"  Average replan time: {avg_replan:.1f}s")
+            if max(replan_durations) <= 30.0:
+                report.append("  PASS: all replans resolved within 30s")
+            else:
+                report.append(f"  WARN: longest replan took {max(replan_durations):.1f}s")
+        else:
+            report.append("  No replanning events")
+
+        # ── Time Analysis ──
+        report.append("\n=== Time Analysis ===")
+        total_classified = m.time_moving + m.time_stopped + m.time_turning + m.time_recovering
+        idle_ratio_pass = True
+        if total_classified > 0:
+            report.append(f"  Total classified:  {total_classified:.0f}s")
+            report.append(
+                f"  Moving:            {m.time_moving:.0f}s "
+                f"({m.time_moving / total_classified * 100:.1f}%)"
+            )
+            report.append(
+                f"  Stopped/idle:      {m.time_stopped:.0f}s "
+                f"({m.time_stopped / total_classified * 100:.1f}%)"
+            )
+            report.append(
+                f"  Turning:           {m.time_turning:.0f}s "
+                f"({m.time_turning / total_classified * 100:.1f}%)"
+            )
+            report.append(
+                f"  Recovering:        {m.time_recovering:.0f}s "
+                f"({m.time_recovering / total_classified * 100:.1f}%)"
+            )
+            idle_pct = m.time_stopped / total_classified * 100
+            report.append(f"  Idle ratio:        {idle_pct:.1f}%")
+            if idle_pct < 20.0:
+                report.append("  PASS: idle ratio < 20%")
+            else:
+                report.append("  FAIL: idle ratio >= 20%")
+                idle_ratio_pass = False
+        else:
+            report.append("  No time data collected")
+            idle_ratio_pass = False
+
+        # ── BT State Durations ──
+        report.append("\n  BT State Durations:")
+        for state, dur in sorted(m.bt_state_durations.items(), key=lambda x: -x[1]):
+            pct = dur / t * 100 if t > 0 else 0
+            report.append(f"    {state:30s} {dur:7.1f}s  ({pct:5.1f}%)")
+
+        # ── Speed Statistics ──
+        report.append("\n=== Speed Statistics ===")
+        for phase in ["UNDOCKING", "MOWING", "DOCKING"]:
+            speeds = m.phase_speeds.get(phase, [])
+            if speeds:
+                avg_s = sum(speeds) / len(speeds)
+                report.append(
+                    f"  {phase:12s}: avg={avg_s:.3f}  min={min(speeds):.3f}  "
+                    f"max={max(speeds):.3f} m/s  ({len(speeds)} samples)"
+                )
+        all_speeds = [s for sl in m.phase_speeds.values() for s in sl]
+        if all_speeds:
+            report.append(
+                f"  {'OVERALL':12s}: avg={sum(all_speeds)/len(all_speeds):.3f}  "
+                f"min={min(all_speeds):.3f}  max={max(all_speeds):.3f} m/s"
+            )
+
+        # ── Per-Phase Time ──
+        report.append("\n=== Per-Phase Time Breakdown ===")
+        for phase in ["UNDOCKING", "PLANNING", "MOWING", "DOCKING"]:
+            mv = m.phase_time_moving.get(phase, 0)
+            st = m.phase_time_stopped.get(phase, 0)
+            total_p = mv + st
+            if total_p > 0:
+                report.append(
+                    f"  {phase:12s}: {total_p:6.0f}s total  "
+                    f"moving={mv:.0f}s ({mv/total_p*100:.0f}%)  "
+                    f"stopped={st:.0f}s ({st/total_p*100:.0f}%)"
+                )
 
         # ── Movement ──
         report.append("\n=== Movement ===")
         if len(poses) > 1:
             dist = sum(
-                math.sqrt((poses[i][1]-poses[i-1][1])**2 + (poses[i][2]-poses[i-1][2])**2)
+                math.sqrt(
+                    (poses[i][1] - poses[i - 1][1]) ** 2
+                    + (poses[i][2] - poses[i - 1][2]) ** 2
+                )
                 for i in range(1, len(poses))
             )
             report.append(f"  Total distance: {dist:.1f} m")
-            report.append(f"  Average speed:  {dist/t:.3f} m/s")
+            report.append(f"  Average speed:  {dist / t:.3f} m/s")
+            # Area yield
+            if m.covered_cells:
+                cell_area = m.coverage_grid_resolution ** 2
+                area_m2 = len(m.covered_cells) * cell_area
+                report.append(f"  Area mowed:     {area_m2:.1f} m²")
+                report.append(f"  Area yield:     {area_m2/dist:.3f} m²/m traveled")
 
         # ── Overall Verdict ──
-        report.append(f"\n{'#'*70}")
+        report.append(f"\n{'#' * 70}")
         report.append("VALIDATION CRITERIA:")
 
+        # Overlap pass/fail
+        overlap_pass = True
+        if m.covered_cell_visits:
+            visit_counts = list(m.covered_cell_visits.values())
+            single = sum(1 for v in visit_counts if v == 1)
+            overlap_ratio = (1 - single / len(visit_counts)) * 100 if visit_counts else 0
+            if overlap_ratio > 30:
+                overlap_pass = False
+
         criteria = [
-            ("Undock→Plan→Mow→Dock cycle", all_phases_pass),
+            ("Undock->Plan->Mow->Dock cycle", all_phases_pass),
             ("Path tracking (median < 50cm)", path_pass),
             ("SLAM map growth", map_pass),
             ("No collisions", collision_pass),
             ("Obstacle avoidance", obstacle_pass),
+            ("Mowing efficiency >= 0.85", efficiency_pass),
+            ("Area coverage >= 80%", coverage_pass),
+            ("Idle ratio < 20%", idle_ratio_pass),
+            ("Path overlap < 30%", overlap_pass),
         ]
 
         overall_pass = True
@@ -685,7 +1269,7 @@ class E2ETestNode(Node):
                 overall_pass = False
 
         report.append(f"\nOVERALL: {'PASS' if overall_pass else 'NEEDS ATTENTION'}")
-        report.append(f"{'#'*70}\n")
+        report.append(f"{'#' * 70}\n")
 
         self.get_logger().info("\n".join(report))
 
