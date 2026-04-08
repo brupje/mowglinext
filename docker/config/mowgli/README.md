@@ -21,7 +21,7 @@ defaults without rebuilding the image.
 | `localization.yaml` | Dual EKF tuning (GPS/odom fusion weights, process noise) |
 | `slam_toolbox.yaml` | SLAM parameters (loop closure, scan matching, map resolution) |
 | `hardware_bridge.yaml` | Serial port, baud rate, heartbeat/publish rates |
-| `coverage_planner.yaml` | Coverage planner (tool width, headland, path spacing, turning radius) |
+| `coverage_planner.yaml` | B-RV coverage planner (tool width, headland, Voronoi transit, sweep direction) |
 | `behavior_tree.yaml` | Behavior tree tick rate, battery thresholds |
 | `mqtt_bridge.yaml` | MQTT broker connection for Home Assistant integration |
 

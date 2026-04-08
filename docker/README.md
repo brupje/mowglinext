@@ -271,7 +271,7 @@ to override the built-in defaults without rebuilding the image:
 | `localization.yaml` | Dual EKF — GPS/odometry fusion weights and process noise |
 | `slam_toolbox.yaml` | SLAM loop closure, scan matching, map resolution |
 | `hardware_bridge.yaml` | Serial port, baud rate, heartbeat and publish rates |
-| `coverage_planner.yaml` | Coverage planner (tool width, headland, path spacing, turning radius) |
+| `coverage_planner.yaml` | B-RV coverage planner (tool width, headland, Voronoi transit, sweep direction) |
 | `behavior_tree.yaml` | Behavior tree tick rate, battery thresholds |
 | `mqtt_bridge.yaml` | MQTT broker connection for Home Assistant |
 

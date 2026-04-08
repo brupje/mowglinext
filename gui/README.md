@@ -98,8 +98,7 @@ Available topics :
 - /gui/imu/data_raw
 - /gui/mower/wheel_ticks
 - /gui/xbot_monitoring/map
-- /gui/slic3r_coverage_planner/path_marker_array
-- /gui/move_base_flex/FTCPlanner
+- /gui/coverage_planner_node/coverage_path
 - /gui/mowing_path
 
 Available commands :
