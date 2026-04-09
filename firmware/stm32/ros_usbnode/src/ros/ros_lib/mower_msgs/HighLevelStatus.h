@@ -45,6 +45,7 @@ namespace mower_msgs
       enum { HIGH_LEVEL_STATE_IDLE = 1 };
       enum { HIGH_LEVEL_STATE_AUTONOMOUS = 2 };
       enum { HIGH_LEVEL_STATE_RECORDING = 3 };
+      enum { HIGH_LEVEL_STATE_MANUAL_MOWING = 4 };
 
     HighLevelStatus():
       state(0),
@@ -282,7 +283,7 @@ namespace mower_msgs
     }
 
     virtual const char * getType() override { return "mower_msgs/HighLevelStatus"; };
-    virtual const char * getMD5() override { return "2ca77d7841a80cdbddc4fde19a55bd88"; };
+    virtual const char * getMD5() override { return "1f02876b184fe06f0c0f408686e2b433"; };
 
   };
 

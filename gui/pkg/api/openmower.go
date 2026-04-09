@@ -210,6 +210,8 @@ func SubscriberRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 			def, err = subscribe(provider, c, conn, "robotDescription", -1)
 		case "coverageCells":
 			def, err = subscribe(provider, c, conn, "coverageCells", -1)
+		case "recordingTrajectory":
+			def, err = subscribe(provider, c, conn, "recordingTrajectory", -1)
 		}
 		if err != nil {
 			log.Println(err.Error())

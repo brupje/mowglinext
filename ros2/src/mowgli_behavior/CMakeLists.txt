@@ -49,6 +49,7 @@ add_executable(behavior_tree_node
   src/status_nodes.cpp
   src/utility_nodes.cpp
   src/coverage_nodes.cpp
+  src/recording_nodes.cpp
   src/register_nodes.cpp
 )
 
@@ -102,9 +103,31 @@ install(DIRECTORY include/
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
+  find_package(ament_cmake_gtest REQUIRED)
   # Exclude uncrustify — we use clang-format (see .clang-format)
   set(ament_cmake_uncrustify_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  # ---- test_recording_nodes ----
+  ament_add_gtest(test_recording_nodes
+    test/test_recording_nodes.cpp
+    src/recording_nodes.cpp
+  )
+
+  target_include_directories(test_recording_nodes PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+
+  ament_target_dependencies(test_recording_nodes
+    rclcpp
+    geometry_msgs
+    behaviortree_cpp
+    mowgli_interfaces
+    nav_msgs
+    tf2
+    tf2_ros
+  )
 endif()
 
 ament_package()

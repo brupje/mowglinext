@@ -72,7 +72,8 @@ struct BTContext
 
   /// Last command received via the ~/high_level_control service.
   /// Constants match HighLevelControl.srv (COMMAND_START=1, COMMAND_HOME=2,
-  /// COMMAND_S1=3, COMMAND_S2=4, COMMAND_RESET_EMERGENCY=254, …).
+  /// COMMAND_S1=3, COMMAND_S2=4, COMMAND_MANUAL_MOW=7,
+  /// COMMAND_RESET_EMERGENCY=254, …).
   uint8_t current_command{0};
 
   // -----------------------------------------------------------------------

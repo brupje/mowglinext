@@ -51,7 +51,8 @@ var topicMap = map[string]topicDef{
 	"lidar":            {"/scan", "sensor_msgs/msg/LaserScan", 1000},                                     // large message
 	"diagnostics":      {"/diagnostics", "diagnostic_msgs/msg/DiagnosticArray", 2000},
 	"obstacles":        {"/obstacle_tracker/obstacles", "mowgli_interfaces/msg/ObstacleArray", 1000},
-	"robotDescription": {"/robot_description", "std_msgs/msg/String", 0},                                // published once
+	"robotDescription":     {"/robot_description", "std_msgs/msg/String", 0},                                // published once
+	"recordingTrajectory": {"/behavior_tree_node/recording_trajectory", "nav_msgs/msg/Path", 500},        // area recording preview
 }
 
 // ---------------------------------------------------------------------------
