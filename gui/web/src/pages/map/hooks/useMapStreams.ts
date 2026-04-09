@@ -244,6 +244,40 @@ export function useMapStreams({
         }
     );
 
+    const recordingTrajectoryStream = useWS<string>(
+        () => {
+            console.log({ message: "RecordingTrajectory Stream closed" });
+        },
+        () => {
+            console.log({ message: "RecordingTrajectory Stream connected" });
+        },
+        (e) => {
+            const path = JSON.parse(e) as Path;
+            if (!path.Poses || path.Poses.length === 0) {
+                // Recording cleared — remove trajectory feature
+                setFeatures((oldFeatures) => {
+                    const newFeatures = { ...oldFeatures };
+                    delete newFeatures["recording-trajectory"];
+                    return newFeatures;
+                });
+                return;
+            }
+            // Draw the recording trajectory as a line on the map
+            const coords = path.Poses.map(p =>
+                transpose(offsetX, offsetY, datum, p.Pose?.Position?.Y ?? 0, p.Pose?.Position?.X ?? 0)
+            );
+            setFeatures((oldFeatures) => ({
+                ...oldFeatures,
+                ["recording-trajectory"]: new PathFeature(
+                    "recording-trajectory",
+                    coords,
+                    "#ff6600",
+                    0.3,
+                ),
+            }));
+        }
+    );
+
     const coverageCellsStream = useWS<string>(
         () => {
             console.log({ message: "CoverageCells Stream closed" });
@@ -339,6 +373,7 @@ export function useMapStreams({
             lidarStream.stop();
             obstaclesStream.stop();
             coverageCellsStream.stop();
+            recordingTrajectoryStream.stop();
             highLevelStatus.stop();
             setPath(undefined);
             setPlan(undefined);
@@ -362,14 +397,23 @@ export function useMapStreams({
         }
     }, [editMap]);
 
-    // Start joy stream on AREA_RECORDING state
+    // Start joy + recording trajectory streams on RECORDING state
     useEffect(() => {
-        if (highLevelStatus.highLevelStatus.StateName == "AREA_RECORDING") {
+        const stateName = highLevelStatus.highLevelStatus.StateName;
+        if (stateName === "RECORDING" || stateName === "AREA_RECORDING") {
             joyStream.start("/api/openmower/publish/joy");
+            recordingTrajectoryStream.start("/api/openmower/subscribe/recordingTrajectory");
             setEditMap(false);
             return;
         }
         joyStream.stop();
+        recordingTrajectoryStream.stop();
+        // Clear trajectory feature when leaving recording mode
+        setFeatures((oldFeatures) => {
+            const newFeatures = { ...oldFeatures };
+            delete newFeatures["recording-trajectory"];
+            return newFeatures;
+        });
     }, [highLevelStatus.highLevelStatus.StateName]);
 
     // Restart all streams on settings change
@@ -401,6 +445,7 @@ export function useMapStreams({
             lidarStream.stop();
             obstaclesStream.stop();
             coverageCellsStream.stop();
+            recordingTrajectoryStream.stop();
             highLevelStatus.stop();
         };
     }, []);

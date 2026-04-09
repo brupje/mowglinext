@@ -3,16 +3,18 @@
   main_tree.xml — Mowgli BehaviorTree.CPP v4 main tree
 
   State constants (HighLevelStatus.msg):
-    HIGH_LEVEL_STATE_NULL       = 0
-    HIGH_LEVEL_STATE_IDLE       = 1
-    HIGH_LEVEL_STATE_AUTONOMOUS = 2
-    HIGH_LEVEL_STATE_RECORDING  = 3
+    HIGH_LEVEL_STATE_NULL           = 0
+    HIGH_LEVEL_STATE_IDLE           = 1
+    HIGH_LEVEL_STATE_AUTONOMOUS     = 2
+    HIGH_LEVEL_STATE_RECORDING      = 3
+    HIGH_LEVEL_STATE_MANUAL_MOWING  = 4
 
   HighLevelControl commands (HighLevelControl.srv):
-    COMMAND_START = 1
-    COMMAND_HOME  = 2
-    COMMAND_S1    = 3   (recording)
-    COMMAND_S2    = 4
+    COMMAND_START      = 1
+    COMMAND_HOME       = 2
+    COMMAND_S1         = 3   (recording)
+    COMMAND_S2         = 4   (mow next area)
+    COMMAND_MANUAL_MOW = 7
 -->
 <root BTCPP_format="4" main_tree_to_execute="MowgliMain">
 
@@ -21,8 +23,11 @@
 
       <!-- ================================================================
            GUARD 1: Emergency (always checked, highest priority)
-           Polls every 1s. If emergency can't be cleared, robot stays
-           stopped — which is the correct safety behavior.
+           Polls every 1s. If the robot is placed back on the dock
+           (charging detected), automatically send an emergency release
+           to the firmware. The firmware is the safety authority and
+           will only clear the latch if the physical trigger (lift/stop
+           button) is no longer asserted.
            ================================================================ -->
       <Fallback name="EmergencyGuard">
         <Inverter><IsEmergency/></Inverter>
@@ -30,7 +35,16 @@
           <SetMowerEnabled enabled="false"/>
           <StopMoving/>
           <PublishHighLevelStatus state="0" state_name="EMERGENCY"/>
-          <WaitForDuration duration_sec="1.0"/>
+          <Fallback name="AutoResetOrWait">
+            <!-- If charging (on dock), auto-reset emergency -->
+            <Sequence name="DockAutoReset">
+              <IsCharging/>
+              <ResetEmergency/>
+              <WaitForDuration duration_sec="1.0"/>
+            </Sequence>
+            <!-- Not on dock — just wait and re-check -->
+            <WaitForDuration duration_sec="1.0"/>
+          </Fallback>
         </Sequence>
       </Fallback>
 
@@ -356,16 +370,40 @@
         </Sequence>
 
         <!-- ============================================================
-             d. Recording (COMMAND_S1 = 3)
+             d. Recording (COMMAND_S1 = 3 = COMMAND_RECORD_AREA)
+             User drives robot along boundary. The RecordArea node
+             records positions at 2 Hz and publishes a live trajectory
+             preview. When the user presses "Finish" (command 5) the
+             trajectory is simplified with Douglas-Peucker and saved
+             as a mowing area. "Cancel" (command 6) discards it.
              ============================================================ -->
         <Sequence name="RecordingSequence">
           <IsCommand command="3"/>
           <PublishHighLevelStatus state="3" state_name="RECORDING"/>
+          <RecordArea
+            simplification_tolerance="0.2"
+            min_vertices="3"
+            min_area="1.0"
+            record_rate_hz="2.0"
+            is_exclusion_zone="false"/>
+          <PublishHighLevelStatus state="1" state_name="RECORDING_COMPLETE"/>
+          <ClearCommand/>
+        </Sequence>
+
+        <!-- ============================================================
+             e. Manual Mowing (COMMAND_MANUAL_MOW = 7)
+             Teleop via /cmd_vel_teleop (twist_mux priority).
+             Blade is managed by GUI (fire-and-forget to firmware).
+             Collision_monitor remains active. GPS/SLAM continues.
+             ============================================================ -->
+        <Sequence name="ManualMowingSequence">
+          <IsCommand command="7"/>
+          <PublishHighLevelStatus state="4" state_name="MANUAL_MOWING"/>
           <WaitForDuration duration_sec="0.5"/>
         </Sequence>
 
         <!-- ============================================================
-             e. Idle default
+             f. Idle default
              ============================================================ -->
         <Sequence name="IdleSequence">
           <SetMowerEnabled enabled="false"/>

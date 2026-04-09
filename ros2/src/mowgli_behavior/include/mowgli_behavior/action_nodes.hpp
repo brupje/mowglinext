@@ -20,6 +20,7 @@
 #include "mowgli_behavior/calibration_nodes.hpp"
 #include "mowgli_behavior/docking_nodes.hpp"
 #include "mowgli_behavior/navigation_nodes.hpp"
+#include "mowgli_behavior/recording_nodes.hpp"
 #include "mowgli_behavior/status_nodes.hpp"
 #include "mowgli_behavior/utility_nodes.hpp"
 
