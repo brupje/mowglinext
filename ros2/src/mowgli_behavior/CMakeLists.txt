@@ -43,7 +43,11 @@ find_package(robot_localization REQUIRED)
 add_executable(behavior_tree_node
   src/behavior_tree_node.cpp
   src/condition_nodes.cpp
-  src/action_nodes.cpp
+  src/navigation_nodes.cpp
+  src/docking_nodes.cpp
+  src/calibration_nodes.cpp
+  src/status_nodes.cpp
+  src/utility_nodes.cpp
   src/coverage_nodes.cpp
   src/register_nodes.cpp
 )

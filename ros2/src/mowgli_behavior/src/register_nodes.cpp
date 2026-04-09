@@ -13,9 +13,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "mowgli_behavior/action_nodes.hpp"
+#include "mowgli_behavior/calibration_nodes.hpp"
 #include "mowgli_behavior/condition_nodes.hpp"
 #include "mowgli_behavior/coverage_nodes.hpp"
+#include "mowgli_behavior/docking_nodes.hpp"
+#include "mowgli_behavior/navigation_nodes.hpp"
+#include "mowgli_behavior/status_nodes.hpp"
+#include "mowgli_behavior/utility_nodes.hpp"
 
 namespace mowgli_behavior
 {
