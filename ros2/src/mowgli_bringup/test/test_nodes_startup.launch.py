@@ -187,6 +187,8 @@ class TestNodesStartup(unittest.TestCase):
             "/wheel_odom",
             "/diagnostics",
             "/map_server/grid_map",
+            "/mowgli_behavior_node/high_level_status",
+            "/mowgli_behavior_node/recording_trajectory",
         }
 
         deadline = time.monotonic() + 10.0
@@ -213,6 +215,8 @@ class TestNodesStartup(unittest.TestCase):
         required_services = {
             "/map_server/save_map",
             "/map_server/clear_map",
+            "/mowgli_behavior_node/high_level_control",
+            "/map_server/add_area",
         }
 
         deadline = time.monotonic() + 10.0
