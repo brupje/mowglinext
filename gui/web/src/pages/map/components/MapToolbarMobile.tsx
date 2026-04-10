@@ -27,6 +27,7 @@ import {
     PlusOutlined,
     BorderOutlined,
     AimOutlined,
+    EnvironmentOutlined,
     ForwardOutlined,
     PauseOutlined,
     CaretRightOutlined,
@@ -73,6 +74,7 @@ interface MapToolbarMobileProps {
     onSubtract?: () => void;
     onSplit?: () => void;
     onPlaceDock?: () => void;
+    onSetDockAtMower?: () => void;
     dockPlacementMode?: boolean;
     stateName?: string;
     emergency?: boolean;
@@ -96,7 +98,7 @@ export const MapToolbarMobile = ({
     onBackupMap, onRestoreMap, onDownloadGeoJSON, onUploadGeoJSON,
     onMowArea, selectedFeatureCount = 0, onEditSelectedFeature,
     onDrawPolygon, onDrawShape, onDrawEmoji, onTrash, onCombine, onSubtract, onSplit,
-    onPlaceDock, dockPlacementMode,
+    onPlaceDock, onSetDockAtMower, dockPlacementMode,
     stateName, emergency,
     onStart, onHome, onEmergencyOn, onEmergencyOff,
     onAreaRecording, onMowNextArea, onContinueOrPause,
@@ -284,6 +286,11 @@ export const MapToolbarMobile = ({
                     type={dockPlacementMode ? "primary" : "default"}
                     onClick={onPlaceDock}
                     aria-label="Place dock"
+                />
+                <Button
+                    icon={<EnvironmentOutlined />}
+                    onClick={onSetDockAtMower}
+                    aria-label="Set dock at mower"
                 />
 
                 <Dropdown

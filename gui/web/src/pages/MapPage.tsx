@@ -172,17 +172,18 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
         mapInstanceRef,
     });
     useEffect(() => {
+        // Don't rebuild features from stream data while in edit mode —
+        // path/plan becoming undefined when streams stop would wipe user edits.
+        if (editMap) return;
+
         let newFeatures: Record<string, MowingFeature> = {}
         if (map) {
             const workingAreas = buildFeatures(map.WorkingArea??[], "area")
             const navigationAreas = buildFeatures(map.NavigationAreas??[], "navigation")
             newFeatures = {...workingAreas, ...navigationAreas}
-            
 
             const dock_lonlat = transpose(offsetX, offsetY, datum, map?.DockY!!, map?.DockX!!)
             newFeatures["dock"] = new DockFeatureBase(dock_lonlat, map?.DockHeading ?? 0);
-
-
         }
         if (path?.Markers) {
             Object.values<Marker>(path.Markers).filter((f) => {
@@ -209,7 +210,7 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
             console.debug(newFeatures);
         }
         setFeatures(newFeatures)
-    }, [map, path, plan, offsetX, offsetY, datum]);
+    }, [map, path, plan, offsetX, offsetY, datum, editMap]);
 
     useEffect(() => {
         const labels = buildLabels(Object.values(features))
@@ -369,6 +370,19 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
         });
         setHasUnsavedChanges(true);
     }, [setHasUnsavedChanges]);
+
+    const handleSetDockAtMower = useCallback(() => {
+        const pose = robotPoseRef.current;
+        if (!pose) {
+            notification.warning({message: "No robot position available"});
+            return;
+        }
+        const coord = transpose(offsetX, offsetY, datum, pose.y, pose.x);
+        setFeatures(prev => ({...prev, dock: new DockFeatureBase(coord, pose.heading)}));
+        setDockPlacementMode(false);
+        setHasUnsavedChanges(true);
+        notification.success({message: "Dock set at robot position"});
+    }, [offsetX, offsetY, datum, setHasUnsavedChanges, notification]);
 
     // Mower action callbacks shared between desktop and mobile toolbars
     const mowerActions = useMemo(() => ({
@@ -717,6 +731,7 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
                         onSubtract={handleSubtract}
                         onSplit={handleSplit}
                         onPlaceDock={handleDockPlacement}
+                        onSetDockAtMower={handleSetDockAtMower}
                         dockPlacementMode={dockPlacementMode}
                         onSaveMap={handleSaveMap}
                         onUndo={handleUndo}
@@ -759,6 +774,7 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
                         onSplit={handleSplit}
                         onEditSelectedFeature={handleEditSelectedFeature}
                         onPlaceDock={handleDockPlacement}
+                        onSetDockAtMower={handleSetDockAtMower}
                         dockPlacementMode={dockPlacementMode}
                         dockHeading={features["dock"] instanceof DockFeatureBase ? (features["dock"] as DockFeatureBase).getHeading() : 0}
                         onDockHeadingChange={handleDockHeadingChange}

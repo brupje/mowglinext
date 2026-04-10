@@ -12,6 +12,7 @@ import {
     FormOutlined,
     PlusOutlined,
     AimOutlined,
+    EnvironmentOutlined,
 } from "@ant-design/icons";
 import AsyncButton from "../../../components/AsyncButton.tsx";
 import {ShapePickerDropdown} from "./ShapePickerDropdown.tsx";
@@ -36,6 +37,7 @@ interface MapEditorToolbarProps {
     onSplit?: () => void;
     onEditSelectedFeature?: () => void;
     onPlaceDock?: () => void;
+    onSetDockAtMower?: () => void;
     dockPlacementMode?: boolean;
     dockHeading?: number;
     onDockHeadingChange?: (heading: number) => void;
@@ -90,7 +92,7 @@ export const MapEditorToolbar = ({
     hasUnsavedChanges, historyIndex, editHistoryLength,
     selectedFeatureCount, onSaveMap, onCancel, onUndo, onRedo,
     onDrawPolygon, onDrawShape, onDrawEmoji, onTrash, onCombine, onSubtract, onSplit, onEditSelectedFeature,
-    onPlaceDock, dockPlacementMode, dockHeading, onDockHeadingChange,
+    onPlaceDock, onSetDockAtMower, dockPlacementMode, dockHeading, onDockHeadingChange,
 }: MapEditorToolbarProps) => {
     const {colors} = useThemeMode();
 
@@ -191,6 +193,11 @@ export const MapEditorToolbar = ({
             onClick={onPlaceDock}
             primary={dockPlacementMode}
             glow={dockPlacementMode}
+        />
+        <ToolButton
+            icon={<EnvironmentOutlined/>}
+            tooltip="Set dock at mower position"
+            onClick={onSetDockAtMower}
         />
         <Tooltip title="Dock heading (radians)" placement="right">
             <div style={{padding: '2px 4px'}}>

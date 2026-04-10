@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sync"
 	"time"
 
@@ -134,7 +135,11 @@ type RosProvider struct {
 	subscribers map[string]map[string]*RosSubscriber // logicalKey -> id -> subscriber
 	lastMessage map[string][]byte                     // logicalKey -> last JSON bytes
 
-	// Mowing path state (guarded by mtx)
+	// Cached docking pose from map_server_node (guarded by mtx)
+	dockPoseSet bool
+	dockX       float64
+	dockY       float64
+	dockHeading float64
 
 	dbProvider types2.IDBProvider
 }
@@ -165,6 +170,7 @@ func NewRosProvider(dbProvider types2.IDBProvider) types2.IRosProvider {
 			// re-sent on reconnect.
 		}
 		r.initRosbridgeSubscriptions()
+			r.initDockPoseSubscription()
 			r.initMapPolling()
 	}()
 
@@ -241,6 +247,49 @@ func (r *RosProvider) fanOut(logicalKey string, msg []byte) {
 	}
 }
 
+// initDockPoseSubscription subscribes to the map_server_node's docking_pose
+// topic (transient_local QoS) and caches the latest dock position/heading.
+// The cached values are included in the virtual "map" topic by pollMap().
+func (r *RosProvider) initDockPoseSubscription() {
+	type rawPoseStamped struct {
+		Pose struct {
+			Position    struct{ X, Y, Z float64 } `json:"position"`
+			Orientation struct{ X, Y, Z, W float64 } `json:"orientation"`
+		} `json:"pose"`
+	}
+
+	err := r.client.Subscribe(
+		"/map_server_node/docking_pose",
+		"geometry_msgs/msg/PoseStamped",
+		"gui-docking-pose",
+		func(msg json.RawMessage) {
+			var ps rawPoseStamped
+			if err := json.Unmarshal([]byte(msg), &ps); err != nil {
+				logrus.Errorf("RosProvider: unmarshal docking_pose: %v", err)
+				return
+			}
+			q := ps.Pose.Orientation
+			heading := math.Atan2(2*(q.W*q.Z+q.X*q.Y), 1-2*(q.Y*q.Y+q.Z*q.Z))
+
+			r.mtx.Lock()
+			r.dockPoseSet = true
+			r.dockX = ps.Pose.Position.X
+			r.dockY = ps.Pose.Position.Y
+			r.dockHeading = heading
+			r.mtx.Unlock()
+
+			logrus.Infof("RosProvider: docking pose updated (%.3f, %.3f) heading=%.3f",
+				ps.Pose.Position.X, ps.Pose.Position.Y, heading)
+		},
+		0,
+	)
+	if err != nil {
+		logrus.Errorf("RosProvider: subscribe docking_pose: %v", err)
+	} else {
+		logrus.Info("RosProvider: subscribed to /map_server_node/docking_pose")
+	}
+}
+
 // initMapPolling periodically fetches mowing areas from the map_server_node
 // and publishes the result to the virtual "map" topic for the GUI.
 func (r *RosProvider) initMapPolling() {
@@ -286,6 +335,13 @@ func (r *RosProvider) pollMap() {
 		navAreas = []mowgli.MapArea{}
 	}
 
+	// Read cached docking pose (written by initDockPoseSubscription)
+	r.mtx.Lock()
+	dockX := r.dockX
+	dockY := r.dockY
+	dockHeading := r.dockHeading
+	r.mtx.Unlock()
+
 	mapData := mowgli.Map{
 		MapWidth:        20.0,
 		MapHeight:       20.0,
@@ -293,6 +349,9 @@ func (r *RosProvider) pollMap() {
 		MapCenterY:      0.0,
 		NavigationAreas: navAreas,
 		WorkingArea:     workingAreas,
+		DockX:           dockX,
+		DockY:           dockY,
+		DockHeading:     dockHeading,
 	}
 
 	data, err := json.Marshal(mapData)
