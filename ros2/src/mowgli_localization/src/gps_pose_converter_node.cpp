@@ -40,6 +40,7 @@
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "mowgli_interfaces/msg/absolute_pose.hpp"
+#include "mowgli_interfaces/msg/status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace mowgli_localization
@@ -70,6 +71,8 @@ void GpsPoseConverterNode::declare_parameters()
   min_accuracy_threshold_ = declare_parameter<double>("min_accuracy_threshold", 0.5);
   heading_min_speed_ = declare_parameter<double>("heading_min_speed", 0.15);
   heading_good_variance_ = declare_parameter<double>("heading_good_variance", 0.1);
+  gps_ramp_duration_ = declare_parameter<double>("gps_ramp_duration", 8.0);
+  gps_ramp_start_multiplier_ = declare_parameter<double>("gps_ramp_start_multiplier", 100.0);
 }
 
 void GpsPoseConverterNode::create_publishers()
@@ -87,16 +90,97 @@ void GpsPoseConverterNode::create_subscribers()
       {
         on_absolute_pose(msg);
       });
+
+  status_sub_ = create_subscription<mowgli_interfaces::msg::Status>(
+      "/hardware_bridge/status",
+      rclcpp::QoS(10),
+      [this](mowgli_interfaces::msg::Status::ConstSharedPtr msg)
+      {
+        on_status(msg);
+      });
 }
 
 // ---------------------------------------------------------------------------
 // Callback
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Status callback — dock/undock state tracking
+// ---------------------------------------------------------------------------
+
+void GpsPoseConverterNode::on_status(
+    mowgli_interfaces::msg::Status::ConstSharedPtr msg)
+{
+  const bool was_docked = is_docked_;
+  is_docked_ = msg->is_charging;
+
+  if (was_docked && !is_docked_)
+  {
+    // Transition: docked → undocked. Start covariance ramp-down.
+    undock_time_ = now();
+    ramp_complete_ = false;
+    RCLCPP_INFO(get_logger(),
+                "GPS gating: undock detected — ramping GPS covariance over %.1fs",
+                gps_ramp_duration_);
+  }
+  else if (!was_docked && is_docked_)
+  {
+    RCLCPP_INFO(get_logger(), "GPS gating: docked — suppressing GPS output");
+  }
+}
+
+double GpsPoseConverterNode::dock_covariance_multiplier() const
+{
+  if (ramp_complete_)
+  {
+    return 1.0;
+  }
+
+  const double elapsed = (now() - undock_time_).seconds();
+  if (elapsed >= gps_ramp_duration_)
+  {
+    return 1.0;
+  }
+
+  // Linear ramp from gps_ramp_start_multiplier_ down to 1.0
+  const double t = elapsed / gps_ramp_duration_;  // 0..1
+  return gps_ramp_start_multiplier_ * (1.0 - t) + 1.0 * t;
+}
+
+// ---------------------------------------------------------------------------
+// GPS pose callback
+// ---------------------------------------------------------------------------
+
 void GpsPoseConverterNode::on_absolute_pose(
     mowgli_interfaces::msg::AbsolutePose::ConstSharedPtr msg)
 {
-  const double xy_variance = compute_xy_variance(*msg);
+  // --- Dock GPS gating ---
+  // While docked, don't publish GPS to ekf_map. The EKF relies on SLAM heading
+  // and odom velocity (both stable while stationary). This prevents noisy GPS
+  // from corrupting the heading estimate while parked.
+  if (is_docked_)
+  {
+    // Still update prev pose so heading computation works on first post-undock fix.
+    prev_x_ = msg->pose.pose.position.x;
+    prev_y_ = msg->pose.pose.position.y;
+    prev_stamp_ = now();
+    has_prev_pose_ = true;
+    return;
+  }
+
+  // Check if the ramp period completed since last callback.
+  if (!ramp_complete_)
+  {
+    const double elapsed = (now() - undock_time_).seconds();
+    if (elapsed >= gps_ramp_duration_)
+    {
+      ramp_complete_ = true;
+      RCLCPP_INFO(get_logger(), "GPS gating: ramp complete — normal covariance");
+    }
+  }
+
+  const double cov_mult = dock_covariance_multiplier();
+  const double xy_variance = compute_xy_variance(*msg) * cov_mult;
   const double cur_x = msg->pose.pose.position.x;
   const double cur_y = msg->pose.pose.position.y;
   const rclcpp::Time cur_stamp = now();
@@ -174,12 +258,16 @@ void GpsPoseConverterNode::on_absolute_pose(
   out.pose.pose.orientation.x = 0.0;
   out.pose.pose.orientation.y = 0.0;
 
+  // During the post-undock ramp, also inflate yaw covariance so GPS heading
+  // gently nudges rather than yanks the EKF heading estimate.
+  const double yaw_var_scaled = yaw_variance * std::sqrt(cov_mult);
+
   out.pose.covariance[0] = xy_variance;  // x
   out.pose.covariance[7] = xy_variance;  // y
   out.pose.covariance[14] = 1e6;  // z  (2D mode)
   out.pose.covariance[21] = 1e6;  // roll
   out.pose.covariance[28] = 1e6;  // pitch
-  out.pose.covariance[35] = yaw_variance;  // yaw — tight when moving, loose when stationary
+  out.pose.covariance[35] = yaw_var_scaled;  // yaw — tight when moving, loose when stationary or ramping
 
   pose_pub_->publish(out);
 }

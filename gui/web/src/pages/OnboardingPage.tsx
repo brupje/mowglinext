@@ -301,6 +301,26 @@ const RobotModelStep: React.FC<RobotModelStepProps> = ({ values, onChange }) => 
 
 const GpsStep: React.FC<RobotModelStepProps> = ({ values, onChange }) => {
     const ntripEnabled = values.ntrip_enabled ?? true;
+    const guiApi = useApi();
+    const [datumLoading, setDatumLoading] = useState(false);
+
+    const setDatumFromGps = async () => {
+        setDatumLoading(true);
+        try {
+            const res = await guiApi.mowglinext.callCreate("set_datum", {});
+            if (res.error) throw new Error(res.error.error);
+            const msg: string = (res.data as any)?.message ?? "";
+            const parts = msg.split(",");
+            if (parts.length === 2) {
+                onChange("datum_lat", parseFloat(parts[0]));
+                onChange("datum_lon", parseFloat(parts[1]));
+            }
+        } catch (e: any) {
+            alert(e.message || "Failed to set datum from GPS");
+        } finally {
+            setDatumLoading(false);
+        }
+    };
 
     return (
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -315,7 +335,8 @@ const GpsStep: React.FC<RobotModelStepProps> = ({ values, onChange }) => {
             <Card size="small" title={<Space><EnvironmentOutlined /> Map Origin (Datum)</Space>} style={{ marginBottom: 16 }}>
                 <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
                     Set this to a GPS coordinate near your docking station. The robot uses this as the (0, 0) origin of its local map.
-                    You can get coordinates from Google Maps by right-clicking on your dock location.
+                    You can get coordinates from Google Maps by right-clicking on your dock location, or use the
+                    button below to set it from the robot's current GPS position (requires RTK fix).
                 </Paragraph>
                 <Form layout="vertical">
                     <Row gutter={16}>
@@ -340,6 +361,14 @@ const GpsStep: React.FC<RobotModelStepProps> = ({ values, onChange }) => {
                             </Form.Item>
                         </Col>
                     </Row>
+                    <Button
+                        icon={<AimOutlined />}
+                        loading={datumLoading}
+                        onClick={setDatumFromGps}
+                        style={{ marginTop: -8 }}
+                    >
+                        Use current GPS position (requires RTK fix)
+                    </Button>
                 </Form>
             </Card>
 

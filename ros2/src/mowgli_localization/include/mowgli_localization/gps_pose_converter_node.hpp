@@ -32,6 +32,7 @@
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "mowgli_interfaces/msg/absolute_pose.hpp"
+#include "mowgli_interfaces/msg/status.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace mowgli_localization
@@ -49,8 +50,13 @@ private:
   void create_subscribers();
 
   void on_absolute_pose(mowgli_interfaces::msg::AbsolutePose::ConstSharedPtr msg);
+  void on_status(mowgli_interfaces::msg::Status::ConstSharedPtr msg);
 
   double compute_xy_variance(const mowgli_interfaces::msg::AbsolutePose& msg) const;
+
+  /// Returns the covariance multiplier for the dock/undock transition ramp.
+  /// 1.0 = normal, >1.0 = inflated during ramp-down after undock.
+  double dock_covariance_multiplier() const;
 
   // ---------------------------------------------------------------------------
   // Parameters
@@ -58,12 +64,18 @@ private:
   double min_accuracy_threshold_{0.5};
 
   /// Minimum speed (m/s) for GPS heading to be considered valid.
-  /// Below this, yaw covariance is set very large so the IMU dominates.
   double heading_min_speed_{0.15};
 
   /// Yaw variance (rad²) when speed is well above the threshold.
-  /// A small value means GPS heading dominates when moving.
   double heading_good_variance_{0.1};
+
+  /// Duration (seconds) to ramp GPS covariance from inflated back to normal
+  /// after undocking. During this ramp, position covariance is multiplied by
+  /// a factor that linearly decreases from gps_ramp_start_multiplier_ to 1.0.
+  double gps_ramp_duration_{8.0};
+
+  /// Starting covariance multiplier at the moment of undock.
+  double gps_ramp_start_multiplier_{100.0};
 
   // ---------------------------------------------------------------------------
   // State for heading computation
@@ -74,10 +86,25 @@ private:
   rclcpp::Time prev_stamp_;
 
   // ---------------------------------------------------------------------------
+  // Dock/undock GPS gating state
+  // ---------------------------------------------------------------------------
+
+  /// True when the robot is charging (docked). GPS is suppressed.
+  bool is_docked_{false};
+
+  /// Timestamp when undock was detected (is_charging went false).
+  /// Used to compute the covariance ramp-down.
+  rclcpp::Time undock_time_;
+
+  /// True once the ramp-down period has completed after undock.
+  bool ramp_complete_{true};
+
+  // ---------------------------------------------------------------------------
   // ROS handles
   // ---------------------------------------------------------------------------
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
   rclcpp::Subscription<mowgli_interfaces::msg::AbsolutePose>::SharedPtr abs_pose_sub_;
+  rclcpp::Subscription<mowgli_interfaces::msg::Status>::SharedPtr status_sub_;
 };
 
 }  // namespace mowgli_localization

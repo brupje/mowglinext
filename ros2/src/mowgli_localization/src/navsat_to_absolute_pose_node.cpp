@@ -40,6 +40,7 @@
 #include "mowgli_localization/navsat_to_absolute_pose_node.hpp"
 
 #include <cmath>
+#include <sstream>
 
 namespace mowgli_localization
 {
@@ -64,6 +65,7 @@ NavSatToAbsolutePoseNode::NavSatToAbsolutePoseNode(const rclcpp::NodeOptions& op
   cos_datum_lat_ = std::cos(datum_lat_ * DEG_TO_RAD);
   create_publishers();
   create_subscribers();
+  create_services();
 
   RCLCPP_INFO(get_logger(),
               "NavSatToAbsolutePoseNode started — datum: [%.7f, %.7f]",
@@ -102,8 +104,61 @@ void NavSatToAbsolutePoseNode::create_subscribers()
 // Callback
 // ---------------------------------------------------------------------------
 
+void NavSatToAbsolutePoseNode::create_services()
+{
+  set_datum_srv_ = create_service<std_srvs::srv::Trigger>(
+      "~/set_datum",
+      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> req,
+             std::shared_ptr<std_srvs::srv::Trigger::Response> res)
+      {
+        on_set_datum(req, res);
+      });
+}
+
+void NavSatToAbsolutePoseNode::on_set_datum(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  if (!has_fix_)
+  {
+    response->success = false;
+    response->message = "No GPS fix received yet";
+    return;
+  }
+
+  // Require RTK fixed quality (STATUS_GBAS_FIX from ublox driver).
+  if (last_fix_.status.status < sensor_msgs::msg::NavSatStatus::STATUS_GBAS_FIX)
+  {
+    response->success = false;
+    response->message = "No RTK fixed quality — current status: " +
+                        std::to_string(last_fix_.status.status);
+    return;
+  }
+
+  datum_lat_ = last_fix_.latitude;
+  datum_lon_ = last_fix_.longitude;
+  cos_datum_lat_ = std::cos(datum_lat_ * DEG_TO_RAD);
+
+  RCLCPP_INFO(get_logger(),
+              "Datum updated to [%.8f, %.8f] from current GPS position",
+              datum_lat_, datum_lon_);
+
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(8) << datum_lat_ << "," << datum_lon_;
+  response->success = true;
+  response->message = oss.str();
+}
+
+// ---------------------------------------------------------------------------
+// GPS fix callback
+// ---------------------------------------------------------------------------
+
 void NavSatToAbsolutePoseNode::on_navsat_fix(sensor_msgs::msg::NavSatFix::ConstSharedPtr msg)
 {
+  // Store latest fix for set_datum service.
+  last_fix_ = *msg;
+  has_fix_ = true;
+
   using AbsPose = mowgli_interfaces::msg::AbsolutePose;
   using NavSat = sensor_msgs::msg::NavSatFix;
   using NavStatus = sensor_msgs::msg::NavSatStatus;

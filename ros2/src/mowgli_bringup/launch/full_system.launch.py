@@ -337,6 +337,7 @@ def generate_launch_description() -> LaunchDescription:
         "/map_server_node/.*",
         "/behavior_tree_node/.*",
         "/hardware_bridge/.*",
+        "/navsat_to_absolute_pose/.*",
     ]
 
     foxglove_bridge_node = Node(

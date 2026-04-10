@@ -75,7 +75,7 @@ export const MowerStatus = () => {
     // Battery percent with fallback
     const batteryPercent = (() => {
         if (highLevelStatus.battery_percent != null && highLevelStatus.battery_percent > 0) {
-            return Math.round(highLevelStatus.battery_percent * 100);
+            return Math.round(highLevelStatus.battery_percent);
         }
         if (power.v_battery) {
             const full = parseFloat(settings["battery_full_voltage"] ?? "28.5");
