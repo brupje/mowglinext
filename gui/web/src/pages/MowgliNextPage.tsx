@@ -9,7 +9,7 @@ import {GpsComponent} from "../components/GpsComponent.tsx";
 import {MiniMap} from "../components/MiniMap.tsx";
 import {useIsMobile} from "../hooks/useIsMobile";
 
-export const OpenMowerPage = () => {
+export const MowgliNextPage = () => {
     const isMobile = useIsMobile();
 
     if (isMobile) {
@@ -106,4 +106,4 @@ export const OpenMowerPage = () => {
     </Row>
 }
 
-export default OpenMowerPage;
+export default MowgliNextPage;

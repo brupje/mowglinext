@@ -6,7 +6,7 @@ import {createHashRouter, RouterProvider,} from "react-router-dom";
 import Root from "./routes/root.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
 import LogsPage from "./pages/LogsPage.tsx";
-import OpenMowerPage from "./pages/OpenMowerPage.tsx";
+import MowgliNextPage from "./pages/MowgliNextPage.tsx";
 import MapPage from "./pages/MapPage.tsx";
 import OnboardingPage from "./pages/OnboardingPage.tsx";
 import SchedulePage from "./pages/SchedulePage.tsx";
@@ -28,8 +28,8 @@ const router = createHashRouter([
                 path: "/logs",
             },
             {
-                element: <OpenMowerPage/>,
-                path: "/openmower",
+                element: <MowgliNextPage/>,
+                path: "/mowglinext",
             },
             {
                 element: <MapPage/>,

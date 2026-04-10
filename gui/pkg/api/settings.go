@@ -643,7 +643,7 @@ func PostSettingsYAML(r *gin.RouterGroup, dbProvider types.IDBProvider) gin.IRou
 			return
 		}
 
-		header := "# Mowgli Robot Configuration — managed by openmower-gui\n" +
+		header := "# Mowgli Robot Configuration — managed by mowglinext-gui\n" +
 			"# This file is the single source of truth for robot parameters.\n" +
 			"# Changes made here are picked up on container restart.\n\n"
 

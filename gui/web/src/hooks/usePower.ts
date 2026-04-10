@@ -17,7 +17,7 @@ export const usePower = () => {
             setPower(JSON.parse(e))
         })
     useEffect(() => {
-        powerStream.start("/api/openmower/subscribe/power",)
+        powerStream.start("/api/mowglinext/subscribe/power",)
         return () => {
             powerStream.stop()
         }

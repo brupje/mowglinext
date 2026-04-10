@@ -17,7 +17,7 @@ export const useWheelTicks = () => {
             setWheelTicks(JSON.parse(e))
         })
     useEffect(() => {
-        ticksStream.start("/api/openmower/subscribe/ticks",)
+        ticksStream.start("/api/mowglinext/subscribe/ticks",)
         return () => {
             ticksStream.stop()
         }

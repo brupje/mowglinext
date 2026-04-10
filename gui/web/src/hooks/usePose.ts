@@ -18,7 +18,7 @@ export const usePose = () => {
             setPose(JSON.parse(e))
         })
     useEffect(() => {
-        poseStream.start("/api/openmower/subscribe/pose",)
+        poseStream.start("/api/mowglinext/subscribe/pose",)
         return () => {
             poseStream.stop()
         }

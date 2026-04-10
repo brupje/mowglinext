@@ -1,6 +1,6 @@
-# OpenMower GUI
+# MowgliNext GUI
 
-A GUI for the OpenMower project.
+A GUI for the MowgliNext project.
 
 ## Demo
 
@@ -12,14 +12,14 @@ A GUI for the OpenMower project.
 
 If you are using mowgli-docker, you can skip this part as it's now included in the docker-compose file.
 
-### If your are using OpenMowerOS
+### If your are using MowgliNextOS
 
-OpenMowerOS uses podman and containers are managed by systemd.
+MowgliNextOS uses podman and containers are managed by systemd.
 
-First, create the /boot/openmower/db directory :
+First, create the /boot/mowglinext/db directory :
 
 ```bash
-mkdir /boot/openmower/db
+mkdir /boot/mowglinext/db
 ```
 
 Create a gui.service file in `/etc/systemd/system/` with the following content:
@@ -45,17 +45,17 @@ ExecStartPre=/bin/rm -f %t/container-gui.pid %t/container-gui.ctr-id
 
 ExecStart=/usr/bin/podman run --conmon-pidfile %t/container-gui.pid --cidfile %t/container-gui.ctr-id --cgroups=no-conmon \
   --replace --detach --tty --privileged \
-  --name openmower-gui \
+  --name mowglinext-gui \
   --network=host \
   --env MOWER_CONFIG_FILE=/config/mower_config.sh \
   --env DOCKER_HOST=unix:///run/podman/podman.sock \
   --env ROS_MASTER_URI=http://localhost:11311 \
   --volume /dev:/dev \
   --volume /run/podman/podman.sock:/run/podman/podman.sock \
-  --volume /boot/openmower/db:/app/db \
-  --volume /boot/openmower/mower_config.txt:/config/mower_config.sh \
+  --volume /boot/mowglinext/db:/app/db \
+  --volume /boot/mowglinext/mower_config.txt:/config/mower_config.sh \
   --label io.containers.autoupdate=image \
-  ghcr.io/cedbossneo/openmower-gui:master
+  ghcr.io/cedbossneo/mowglinext-gui:master
 
 #ExecStartPost=/usr/bin/podman image prune --all --force
 
@@ -81,7 +81,7 @@ to `http://<ip of the machine running the container>:4006`
 
 ### HomeKit
 
-The password to use OpenMower in iOS home app is 00102003
+The password to use MowgliNext in iOS home app is 00102003
 Do not forget to set env var HOMEKIT_ENABLED to true
 
 ### MQTT
@@ -116,13 +116,13 @@ Do not forget to set env var MQTT_ENABLED to true
 - MOWER_CONFIG_FILE=mower_config.sh : config file location
 - DOCKER_HOST=unix:///var/run/docker.sock : socker socket
 - ROS_MASTER_URI=http://localhost:11311 : ros master uri
-- ROS_NODE_NAME=openmower-gui : node name
+- ROS_NODE_NAME=mowglinext-gui : node name
 - ROS_NODE_HOST=:4006 : listening port
 - MQTT_ENABLED=true : enable mqtt
 - MQTT_HOST=:1883 : listening port
 - HOMEKIT_ENABLED=true : enable homekit
 - MAP_TILE_ENABLED=true : enable map tiles
-- MAP_TILE_SERVER=http://localhost:5000 : custom map tile server (see https://github.com/2m/openmower-map-tiles for
+- MAP_TILE_SERVER=http://localhost:5000 : custom map tile server (see https://github.com/2m/mowglinext-map-tiles for
   usage)
 - MAP_TILE_URI=/tiles/vt/lyrs=s,h&x={x}&y={y}&z={z}
 
@@ -137,4 +137,4 @@ the backend
 
 To generate go msgs, just run inside the repository this docker command:
 
-docker run -v $PWD:/app ghcr.io/cedbossneo/openmower-gui:generate-msg
+docker run -v $PWD:/app ghcr.io/cedbossneo/mowglinext-gui:generate-msg

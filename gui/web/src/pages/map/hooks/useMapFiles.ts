@@ -129,7 +129,7 @@ export function useMapFiles({
         }
 
         try {
-            await guiApi.openmower.mapReplace(updateMsg);
+            await guiApi.mowglinext.mapReplace(updateMsg);
             notification.success({
                 message: "Area saved",
             });
@@ -149,7 +149,7 @@ export function useMapFiles({
             const rosCoords = itranspose(offsetX, offsetY, datum, coords[1], coords[0]);
             const heading = dockFeature.getHeading();
             const quaternionFromHeading = getQuaternionFromHeading(heading);
-            await guiApi.openmower.mapDockingCreate({
+            await guiApi.mowglinext.mapDockingCreate({
                 dockingPose: {
                     orientation: {
                         x: quaternionFromHeading.X!!,

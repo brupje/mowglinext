@@ -177,7 +177,7 @@ export const useRobotDescription = (): RobotGeometry => {
     );
 
     useEffect(() => {
-        stream.start("/api/openmower/subscribe/robotDescription");
+        stream.start("/api/mowglinext/subscribe/robotDescription");
         return () => {
             stream.stop();
         };

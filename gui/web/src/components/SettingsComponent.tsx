@@ -65,15 +65,15 @@ export const SettingsComponent: React.FC<{
         form.setLoading(loading)
     }, [loading]);
 
-    const restartOpenMower = async () => {
+    const restartMowgliNext = async () => {
         try {
             const resContainersList = await guiApi.containers.containersList()
             if (resContainersList.error) {
                 throw new Error(resContainersList.error.error)
             }
-            const openMowerContainer = resContainersList.data.containers?.find((container) => container.labels?.app == "openmower" || container.names?.includes("/openmower"))
-            if (openMowerContainer?.id) {
-                const res = await guiApi.containers.containersCreate(openMowerContainer.id, "restart")
+            const mowglinextContainer = resContainersList.data.containers?.find((container) => container.labels?.app == "mowglinext" || container.names?.includes("/mowglinext"))
+            if (mowglinextContainer?.id) {
+                const res = await guiApi.containers.containersCreate(mowglinextContainer.id, "restart")
                 if (res.error) {
                     throw new Error(res.error.error)
                 }
@@ -97,9 +97,9 @@ export const SettingsComponent: React.FC<{
             if (resContainersList.error) {
                 throw new Error(resContainersList.error.error)
             }
-            const openMowerContainer = resContainersList.data.containers?.find((container) => container.labels?.app == "gui" || container.names?.includes("/mowglinext"))
-            if (openMowerContainer?.id) {
-                const res = await guiApi.containers.containersCreate(openMowerContainer.id, "restart")
+            const mowglinextContainer = resContainersList.data.containers?.find((container) => container.labels?.app == "gui" || container.names?.includes("/mowglinext"))
+            if (mowglinextContainer?.id) {
+                const res = await guiApi.containers.containersCreate(mowglinextContainer.id, "restart")
                 if (res.error) {
                     throw new Error(res.error.error)
                 }
@@ -224,7 +224,7 @@ export const SettingsComponent: React.FC<{
                 zIndex: 50,
             }}>
                 <FormButtonGroup.FormItem>
-                    {props.actions && props.actions(form, setSettings, restartOpenMower, restartGui)}
+                    {props.actions && props.actions(form, setSettings, restartMowgliNext, restartGui)}
                 </FormButtonGroup.FormItem>
             </Col>
         </Form>

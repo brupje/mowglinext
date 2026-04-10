@@ -137,7 +137,7 @@ func (fp *FirmwareProvider) flashMowgli(writer io.Writer, config types.FirmwareC
 }
 
 func (fp *FirmwareProvider) flashVermut(writer io.Writer, config types.FirmwareConfig) error {
-	// Download the firmware from https://github.com/ClemensElflein/OpenMower/releases/download/latest/firmware.zip to /tmp/firmware.zip
+	// Download the firmware from https://github.com/ClemensElflein/MowgliNext/releases/download/latest/firmware.zip to /tmp/firmware.zip
 	// Unzip /tmp/firmware.zip to /tmp/firmware
 	// Flash the firmware by running command openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg -c "program ./firmware_download/firmware/$OM_HARDWARE_VERSION/firmware.elf verify reset exit"
 

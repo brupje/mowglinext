@@ -37,7 +37,7 @@ func NewAPI(dbProvider types.IDBProvider, dockerProvider types.IDockerProvider, 
 	ConfigRoute(apiGroup, dbProvider)
 	SettingsRoutes(apiGroup, dbProvider)
 	ContainersRoutes(apiGroup, dockerProvider)
-	OpenMowerRoutes(apiGroup, rosProvider)
+	MowgliNextRoutes(apiGroup, rosProvider)
 	SetupRoutes(apiGroup, firmwareProvider)
 	SystemRoutes(apiGroup)
 	ScheduleRoutes(apiGroup, dbProvider)

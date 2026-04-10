@@ -37,7 +37,7 @@ func (hc *HomeKitProvider) Init() {
 }
 
 func (hc *HomeKitProvider) registerAccessories() *accessory.A {
-	hc.mower = accessory.NewSwitch(accessory.Info{Name: "OpenMower"})
+	hc.mower = accessory.NewSwitch(accessory.Info{Name: "MowgliNext"})
 	hc.mower.Switch.On.OnValueRemoteUpdate(func(on bool) {
 		var err error
 		if on {

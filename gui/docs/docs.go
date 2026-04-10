@@ -219,7 +219,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/openmower/call/{command}": {
+        "/mowglinext/call/{command}": {
             "post": {
                 "description": "call a service",
                 "consumes": [
@@ -229,7 +229,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "call a service",
                 "parameters": [
@@ -267,7 +267,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/openmower/map": {
+        "/mowglinext/map": {
             "delete": {
                 "description": "clear the map",
                 "consumes": [
@@ -277,7 +277,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "clear the map",
                 "responses": {
@@ -304,7 +304,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "clear the map and insert areas",
                 "responses": {
@@ -323,7 +323,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/openmower/map/area/add": {
+        "/mowglinext/map/area/add": {
             "post": {
                 "description": "add a map area",
                 "consumes": [
@@ -333,7 +333,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "add a map area",
                 "parameters": [
@@ -363,7 +363,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/openmower/map/docking": {
+        "/mowglinext/map/docking": {
             "post": {
                 "description": "set the docking point",
                 "consumes": [
@@ -373,7 +373,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "set the docking point",
                 "parameters": [
@@ -403,11 +403,11 @@ const docTemplate = `{
                 }
             }
         },
-        "/openmower/publish/{topic}": {
+        "/mowglinext/publish/{topic}": {
             "get": {
                 "description": "publish to a topic",
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "publish to a topic",
                 "parameters": [
@@ -422,11 +422,11 @@ const docTemplate = `{
                 "responses": {}
             }
         },
-        "/openmower/subscribe/{topic}": {
+        "/mowglinext/subscribe/{topic}": {
             "get": {
                 "description": "subscribe to a topic",
                 "tags": [
-                    "openmower"
+                    "mowglinext"
                 ],
                 "summary": "subscribe to a topic",
                 "parameters": [

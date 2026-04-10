@@ -19,7 +19,7 @@ import {IOSInstallBanner} from "../components/IOSInstallBanner.tsx";
 import {useThemeMode} from "../theme/ThemeContext.tsx";
 
 const navItems = [
-    {key: '/openmower', label: 'Dashboard', icon: <RobotOutlined/>},
+    {key: '/mowglinext', label: 'Dashboard', icon: <RobotOutlined/>},
     {key: '/map', label: 'Map', icon: <HeatMapOutlined/>},
     {key: '/schedule', label: 'Schedule', icon: <ClockCircleOutlined/>},
     {key: '/onboarding', label: 'Onboarding', icon: <RocketOutlined/>},
@@ -28,14 +28,14 @@ const navItems = [
 ];
 
 const bottomNavItems = [
-    {key: '/openmower', label: 'Home', icon: <RobotOutlined/>},
+    {key: '/mowglinext', label: 'Home', icon: <RobotOutlined/>},
     {key: '/map', label: 'Map', icon: <HeatMapOutlined/>},
     {key: '/schedule', label: 'Schedule', icon: <ClockCircleOutlined/>},
     {key: '/settings', label: 'Settings', icon: <SettingOutlined/>},
 ];
 
 const pageTitles: Record<string, string> = {
-    '/openmower': 'Dashboard',
+    '/mowglinext': 'Dashboard',
     '/onboarding': 'Onboarding',
     '/settings': 'Settings',
     '/map': 'Map',
@@ -71,11 +71,11 @@ export default function Root() {
 
     useEffect(() => {
         if (route.length === 1 && route[0].pathname === "/") {
-            navigate({pathname: '/openmower'});
+            navigate({pathname: '/mowglinext'});
         }
     }, [route, navigate]);
 
-    const currentPath = route.length > 1 ? route[1].pathname : '/openmower';
+    const currentPath = route.length > 1 ? route[1].pathname : '/mowglinext';
     const pageTitle = pageTitles[currentPath] ?? 'MowgliNext';
 
     const handleNavigate = useCallback((key: string) => {

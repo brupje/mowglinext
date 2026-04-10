@@ -43,12 +43,12 @@ func ContainerListRoutes(group *gin.RouterGroup, provider types2.IDockerProvider
 			if container.Labels == nil {
 				container.Labels = map[string]string{}
 			}
-			if lo.Contains(container.Names, "/openmower") {
-				container.Labels["project"] = "openmower"
-				container.Labels["app"] = "openmower"
+			if lo.Contains(container.Names, "/mowglinext") {
+				container.Labels["project"] = "mowglinext"
+				container.Labels["app"] = "mowglinext"
 			}
 			if lo.Contains(container.Names, "/mowglinext") {
-				container.Labels["project"] = "openmower"
+				container.Labels["project"] = "mowglinext"
 				container.Labels["app"] = "gui"
 			}
 			return Container{

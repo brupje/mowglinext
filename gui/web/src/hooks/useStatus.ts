@@ -17,7 +17,7 @@ export const useStatus = () => {
             setStatus(JSON.parse(e))
         })
     useEffect(() => {
-        statusStream.start("/api/openmower/subscribe/status",)
+        statusStream.start("/api/mowglinext/subscribe/status",)
         return () => {
             statusStream.stop()
         }

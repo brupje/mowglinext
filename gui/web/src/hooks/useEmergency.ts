@@ -17,7 +17,7 @@ export const useEmergency = () => {
             setEmergency(JSON.parse(e))
         })
     useEffect(() => {
-        emergencyStream.start("/api/openmower/subscribe/emergency",)
+        emergencyStream.start("/api/mowglinext/subscribe/emergency",)
         return () => {
             emergencyStream.stop()
         }

@@ -18,7 +18,7 @@ export const mockHighLevelStatus = vi.fn(() => ({
 
 // Mock useApi hook
 export const mockGuiApi = {
-    openmower: {
+    mowglinext: {
         callCreate: vi.fn().mockResolvedValue({}),
     },
     maps: {
@@ -60,7 +60,7 @@ export const mockUseApp = vi.fn(() => ({
 export const mockNavigate = vi.fn();
 export const mockUseMatches = vi.fn(() => [
     {pathname: '/'},
-    {pathname: '/openmower'},
+    {pathname: '/mowglinext'},
 ]);
 
 // Wrapper for rendering with providers

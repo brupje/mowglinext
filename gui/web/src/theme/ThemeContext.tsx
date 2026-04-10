@@ -14,7 +14,7 @@ const ThemeContext = createContext<ThemeContextValue>({
     colors: getColors('light'),
 });
 
-const STORAGE_KEY = 'openmower-theme-mode';
+const STORAGE_KEY = 'mowglinext-theme-mode';
 
 function getInitialMode(): ThemeMode {
     try {

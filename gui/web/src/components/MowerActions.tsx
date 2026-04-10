@@ -18,7 +18,7 @@ export const useMowerAction = () => {
     const guiApi = useApi()
     return (command: string, args: Record<string, any> = {}) => async () => {
         try {
-            const res = await guiApi.openmower.callCreate(command, args)
+            const res = await guiApi.mowglinext.callCreate(command, args)
             if (res.error) {
                 throw new Error(res.error.error)
             }

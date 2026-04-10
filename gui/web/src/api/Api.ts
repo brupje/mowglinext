@@ -437,18 +437,18 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
               ...params,
           }),
   };
-  openmower = {
+  mowglinext = {
       /**
        * @description call a service
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name CallCreate
        * @summary call a service
-       * @request POST:/openmower/call/{command}
+       * @request POST:/mowglinext/call/{command}
        */
       callCreate: (command: string, CallReq: Record<string, any>, params: RequestParams = {}) =>
           this.request<ApiOkResponse, ApiErrorResponse>({
-              path: `/openmower/call/${command}`,
+              path: `/mowglinext/call/${command}`,
               method: "POST",
               body: CallReq,
               type: ContentType.Json,
@@ -459,14 +459,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description clear the map
        *
-       * @tags openmower
-       * @name DeleteOpenmower
+       * @tags mowglinext
+       * @name DeleteMowgliNext
        * @summary clear the map
-       * @request DELETE:/openmower/map
+       * @request DELETE:/mowglinext/map
        */
-      deleteOpenmower: (params: RequestParams = {}) =>
+      deleteMowgliNext: (params: RequestParams = {}) =>
           this.request<ApiOkResponse, ApiErrorResponse>({
-              path: `/openmower/map`,
+              path: `/mowglinext/map`,
               method: "DELETE",
               type: ContentType.Json,
               format: "json",
@@ -476,14 +476,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description add a map area
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name MapAreaAddCreate
        * @summary add a map area
-       * @request POST:/openmower/map/area/add
+       * @request POST:/mowglinext/map/area/add
        */
       mapAreaAddCreate: (CallReq: MowerMapAddMowingAreaSrvReq, params: RequestParams = {}) =>
           this.request<ApiOkResponse, ApiErrorResponse>({
-              path: `/openmower/map/area/add`,
+              path: `/mowglinext/map/area/add`,
               method: "POST",
               body: CallReq,
               type: ContentType.Json,
@@ -494,14 +494,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description replace entire map in a single transaction
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name mapReplace
        * @summary Delete the current map and rplace all areas
-       * @request PUT:/openmower/map
+       * @request PUT:/mowglinext/map
        */
       mapReplace: (CallReq: MowerReplaceMapSrvReq, params: RequestParams = {}) =>
         this.request<ApiOkResponse, ApiErrorResponse>({
-            path: `/openmower/map`,
+            path: `/mowglinext/map`,
             method: "PUT",
             body: CallReq,
             type: ContentType.Json,
@@ -513,14 +513,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description set the docking point
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name MapDockingCreate
        * @summary set the docking point
-       * @request POST:/openmower/map/docking
+       * @request POST:/mowglinext/map/docking
        */
       mapDockingCreate: (CallReq: MowerMapSetDockingPointSrvReq, params: RequestParams = {}) =>
           this.request<ApiOkResponse, ApiErrorResponse>({
-              path: `/openmower/map/docking`,
+              path: `/mowglinext/map/docking`,
               method: "POST",
               body: CallReq,
               type: ContentType.Json,
@@ -531,14 +531,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description publish to a topic
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name PublishDetail
        * @summary publish to a topic
-       * @request GET:/openmower/publish/{topic}
+       * @request GET:/mowglinext/publish/{topic}
        */
       publishDetail: (topic: string, params: RequestParams = {}) =>
           this.request<any, any>({
-              path: `/openmower/publish/${topic}`,
+              path: `/mowglinext/publish/${topic}`,
               method: "GET",
               ...params,
           }),
@@ -546,14 +546,14 @@ export class Api<SecurityDataType extends unknown> extends HttpClient<SecurityDa
       /**
        * @description subscribe to a topic
        *
-       * @tags openmower
+       * @tags mowglinext
        * @name SubscribeDetail
        * @summary subscribe to a topic
-       * @request GET:/openmower/subscribe/{topic}
+       * @request GET:/mowglinext/subscribe/{topic}
        */
       subscribeDetail: (topic: string, params: RequestParams = {}) =>
           this.request<any, any>({
-              path: `/openmower/subscribe/${topic}`,
+              path: `/mowglinext/subscribe/${topic}`,
               method: "GET",
               ...params,
           }),

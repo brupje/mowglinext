@@ -17,7 +17,7 @@ export const useImu = () => {
             setImu(JSON.parse(e))
         })
     useEffect(() => {
-        imuStream.start("/api/openmower/subscribe/imu",)
+        imuStream.start("/api/mowglinext/subscribe/imu",)
         return () => {
             imuStream.stop()
         }

@@ -22,8 +22,8 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-func OpenMowerRoutes(r *gin.RouterGroup, provider types.IRosProvider) {
-	group := r.Group("/openmower")
+func MowgliNextRoutes(r *gin.RouterGroup, provider types.IRosProvider) {
+	group := r.Group("/mowglinext")
 	ServiceRoute(group, provider)
 	AddMapAreaRoute(group, provider)
 	SetDockingPointRoute(group, provider)
@@ -37,13 +37,13 @@ func OpenMowerRoutes(r *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary add a map area
 // @Description add a map area
-// @Tags openmower
+// @Tags mowglinext
 // @Accept  json
 // @Produce  json
 // @Param CallReq body mowgli.AddMowingAreaReq true "request body"
 // @Success 200 {object} OkResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /openmower/map/area/add [post]
+// @Router /mowglinext/map/area/add [post]
 func AddMapAreaRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.POST("/map/area/add", func(c *gin.Context) {
 		var CallReq mowgli.AddMowingAreaReq
@@ -67,12 +67,12 @@ func AddMapAreaRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary clear the map
 // @Description clear the map
-// @Tags openmower
+// @Tags mowglinext
 // @Accept  json
 // @Produce  json
 // @Success 200 {object} OkResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /openmower/map [delete]
+// @Router /mowglinext/map [delete]
 func ClearMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.DELETE("/map", func(c *gin.Context) {
 		err := provider.CallService(c.Request.Context(), "/map_server_node/clear_map", &mowgli.ClearMapReq{}, &mowgli.ClearMapRes{})
@@ -88,12 +88,12 @@ func ClearMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary clear the map and insert areas
 // @Description clear the map and insert areas
-// @Tags openmower
+// @Tags mowglinext
 // @Accept  json
 // @Produce  json
 // @Success 200 {object} OkResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /openmower/map [put]
+// @Router /mowglinext/map [put]
 func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.PUT("/map", func(c *gin.Context) {
 		err := provider.CallService(c.Request.Context(), "/map_server_node/clear_map", &mowgli.ClearMapReq{}, &mowgli.ClearMapRes{})
@@ -136,13 +136,13 @@ func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary set the docking point
 // @Description set the docking point
-// @Tags openmower
+// @Tags mowglinext
 // @Accept  json
 // @Produce  json
 // @Param CallReq body mowgli.SetDockingPointReq true "request body"
 // @Success 200 {object} OkResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /openmower/map/docking [post]
+// @Router /mowglinext/map/docking [post]
 func SetDockingPointRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.POST("/map/docking", func(c *gin.Context) {
 		var CallReq mowgli.SetDockingPointReq
@@ -163,9 +163,9 @@ func SetDockingPointRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary subscribe to a topic
 // @Description subscribe to a topic
-// @Tags openmower
+// @Tags mowglinext
 // @Param topic path string true "logical topic key: diagnostics, status, highLevelStatus, gps, pose, imu, ticks, map, path, plan, mowingPath, power, emergency, dockingSensor, lidar"
-// @Router /openmower/subscribe/{topic} [get]
+// @Router /mowglinext/subscribe/{topic} [get]
 func SubscriberRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.GET("/subscribe/:topic", func(c *gin.Context) {
 		var err error
@@ -231,9 +231,9 @@ func SubscriberRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 //
 // @Summary publish to a topic
 // @Description publish to a topic
-// @Tags openmower
+// @Tags mowglinext
 // @Param topic path string true "topic to publish to, could be: joy"
-// @Router /openmower/publish/{topic} [get]
+// @Router /mowglinext/publish/{topic} [get]
 func PublisherRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.GET("/publish/:topic", func(c *gin.Context) {
 		var err error
@@ -299,14 +299,14 @@ func subscribe(provider types.IRosProvider, c *gin.Context, conn *websocket.Conn
 //
 // @Summary call a service
 // @Description call a service
-// @Tags openmower
+// @Tags mowglinext
 // @Accept  json
 // @Produce  json
 // @Param command path string true "command to call, could be: high_level_control, emergency, mow_enabled, start_in_area"
 // @Param CallReq body map[string]interface{} true "request body"
 // @Success 200 {object} OkResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /openmower/call/{command} [post]
+// @Router /mowglinext/call/{command} [post]
 func ServiceRoute(group *gin.RouterGroup, provider types.IRosProvider) {
 	group.POST("/call/:command", func(c *gin.Context) {
 		command := c.Param("command")

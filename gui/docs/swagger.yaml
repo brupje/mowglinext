@@ -313,7 +313,7 @@ paths:
       summary: get container logs
       tags:
       - containers
-  /openmower/call/{command}:
+  /mowglinext/call/{command}:
     post:
       consumes:
       - application/json
@@ -345,8 +345,8 @@ paths:
             $ref: '#/definitions/api.ErrorResponse'
       summary: call a service
       tags:
-      - openmower
-  /openmower/map:
+      - mowglinext
+  /mowglinext/map:
     delete:
       consumes:
       - application/json
@@ -364,7 +364,7 @@ paths:
             $ref: '#/definitions/api.ErrorResponse'
       summary: clear the map
       tags:
-      - openmower
+      - mowglinext
     put:
       consumes:
       - application/json
@@ -382,8 +382,8 @@ paths:
             $ref: '#/definitions/api.ErrorResponse'
       summary: clear the map and insert areas
       tags:
-      - openmower
-  /openmower/map/area/add:
+      - mowglinext
+  /mowglinext/map/area/add:
     post:
       consumes:
       - application/json
@@ -408,8 +408,8 @@ paths:
             $ref: '#/definitions/api.ErrorResponse'
       summary: add a map area
       tags:
-      - openmower
-  /openmower/map/docking:
+      - mowglinext
+  /mowglinext/map/docking:
     post:
       consumes:
       - application/json
@@ -434,8 +434,8 @@ paths:
             $ref: '#/definitions/api.ErrorResponse'
       summary: set the docking point
       tags:
-      - openmower
-  /openmower/publish/{topic}:
+      - mowglinext
+  /mowglinext/publish/{topic}:
     get:
       description: publish to a topic
       parameters:
@@ -447,8 +447,8 @@ paths:
       responses: {}
       summary: publish to a topic
       tags:
-      - openmower
-  /openmower/subscribe/{topic}:
+      - mowglinext
+  /mowglinext/subscribe/{topic}:
     get:
       description: subscribe to a topic
       parameters:
@@ -461,7 +461,7 @@ paths:
       responses: {}
       summary: subscribe to a topic
       tags:
-      - openmower
+      - mowglinext
   /settings:
     get:
       description: returns a JSON object with the settings

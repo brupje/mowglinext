@@ -13,23 +13,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupOpenMowerRouter(provider types.IRosProvider) *gin.Engine {
+func setupMowgliNextRouter(provider types.IRosProvider) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	group := r.Group("/api")
-	OpenMowerRoutes(group, provider)
+	MowgliNextRoutes(group, provider)
 	return r
 }
 
 func TestServiceRoute_HighLevelControl(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{"Command": 1}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/high_level_control", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/high_level_control", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -40,13 +40,13 @@ func TestServiceRoute_HighLevelControl(t *testing.T) {
 
 func TestServiceRoute_Emergency(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{"Emergency": 1}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/emergency", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/emergency", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -57,13 +57,13 @@ func TestServiceRoute_Emergency(t *testing.T) {
 
 func TestServiceRoute_MowEnabled(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{"MowEnabled": 1, "MowDirection": 0}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/mow_enabled", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/mow_enabled", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -74,13 +74,13 @@ func TestServiceRoute_MowEnabled(t *testing.T) {
 
 func TestServiceRoute_UnknownCommand(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/unknown_command", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/unknown_command", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -95,13 +95,13 @@ func TestServiceRoute_UnknownCommand(t *testing.T) {
 func TestServiceRoute_ServiceError(t *testing.T) {
 	mock := types.NewMockRosProvider()
 	mock.ServiceErr = assert.AnError
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{"Command": 1}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/high_level_control", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/high_level_control", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -110,13 +110,13 @@ func TestServiceRoute_ServiceError(t *testing.T) {
 
 func TestServiceRoute_StartInArea(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{"Area": 2}
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/call/start_in_area", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/call/start_in_area", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
@@ -127,10 +127,10 @@ func TestServiceRoute_StartInArea(t *testing.T) {
 
 func TestClearMapRoute(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("DELETE", "/api/openmower/map", nil)
+	req, _ := http.NewRequest("DELETE", "/api/mowglinext/map", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -141,10 +141,10 @@ func TestClearMapRoute(t *testing.T) {
 func TestClearMapRoute_Error(t *testing.T) {
 	mock := types.NewMockRosProvider()
 	mock.ServiceErr = assert.AnError
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("DELETE", "/api/openmower/map", nil)
+	req, _ := http.NewRequest("DELETE", "/api/mowglinext/map", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -152,7 +152,7 @@ func TestClearMapRoute_Error(t *testing.T) {
 
 func TestSetDockingPointRoute(t *testing.T) {
 	mock := types.NewMockRosProvider()
-	router := setupOpenMowerRouter(mock)
+	router := setupMowgliNextRouter(mock)
 
 	payload := map[string]any{
 		"dockX":   1.5,
@@ -162,7 +162,7 @@ func TestSetDockingPointRoute(t *testing.T) {
 	body, _ := json.Marshal(payload)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/openmower/map/docking", bytes.NewReader(body))
+	req, _ := http.NewRequest("POST", "/api/mowglinext/map/docking", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 

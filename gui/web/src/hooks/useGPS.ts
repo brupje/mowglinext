@@ -18,7 +18,7 @@ export const useGPS = () => {
             setGps(JSON.parse(e))
         })
     useEffect(() => {
-        gpsStream.start("/api/openmower/subscribe/gps",)
+        gpsStream.start("/api/mowglinext/subscribe/gps",)
         return () => {
             gpsStream.stop()
         }

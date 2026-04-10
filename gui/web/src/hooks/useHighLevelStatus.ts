@@ -17,7 +17,7 @@ export const useHighLevelStatus = () => {
             setHighLevelStatus(JSON.parse(e))
         })
     useEffect(() => {
-        highLevelStatusStream.start("/api/openmower/subscribe/highLevelStatus",)
+        highLevelStatusStream.start("/api/mowglinext/subscribe/highLevelStatus",)
         return () => {
             highLevelStatusStream.stop()
         }

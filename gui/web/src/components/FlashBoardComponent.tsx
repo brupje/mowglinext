@@ -323,7 +323,7 @@ export const FlashBoardComponent = (props: { onNext: () => void }) => {
                     <SchemaField><SchemaField.String
                         name={"file"}
                         title={"Archive"}
-                        default={"https://github.com/ClemensElflein/OpenMower/releases/download/latest/firmware.zip"}
+                        default={"https://github.com/ClemensElflein/MowgliNext/releases/download/latest/firmware.zip"}
                         x-decorator-props={{tooltip: "Archive to use for firmware"}}
                         x-component="Input"
                         x-decorator="FormItem"/></SchemaField>

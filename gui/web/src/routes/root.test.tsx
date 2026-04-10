@@ -14,14 +14,14 @@ vi.mock('../hooks/useHighLevelStatus.ts', () => ({
     useHighLevelStatus: () => ({highLevelStatus: {StateName: 'IDLE'}}),
 }));
 
-function renderWithRouter(initialPath = '/openmower') {
+function renderWithRouter(initialPath = '/mowglinext') {
     const router = createMemoryRouter(
         [
             {
                 path: '/',
                 element: <Root/>,
                 children: [
-                    {path: 'openmower', element: <div>Dashboard Content</div>},
+                    {path: 'mowglinext', element: <div>Dashboard Content</div>},
                     {path: 'map', element: <div>Map Content</div>},
                     {path: 'settings', element: <div>Settings Content</div>},
                     {path: 'schedule', element: <div>Schedule Content</div>},
@@ -51,22 +51,22 @@ describe('Root layout', () => {
     });
 
     it('renders page title based on route', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         expect(screen.getAllByText('Dashboard').length).toBeGreaterThanOrEqual(1);
     });
 
     it('renders MowerStatus in header', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         expect(screen.getByTestId('mower-status')).toBeInTheDocument();
     });
 
     it('renders child route content', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         expect(screen.getByText('Dashboard Content')).toBeInTheDocument();
     });
 
     it('renders navigation menu items', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         // Nav rail icons have aria-labels (text only visible when expanded)
         expect(screen.getByLabelText('Dashboard')).toBeInTheDocument();
         expect(screen.getByLabelText('Map')).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe('Root layout', () => {
 
     it('renders MowgliNext branding when rail expanded', async () => {
         const user = userEvent.setup();
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         // Branding text is hidden when rail is collapsed
         expect(screen.queryByText('Next')).not.toBeInTheDocument();
         // Hover over nav to expand rail and show branding
@@ -115,7 +115,7 @@ describe('Root layout - mobile', () => {
     });
 
     it('renders bottom navigation bar on mobile', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         expect(screen.getByLabelText('Home')).toBeInTheDocument();
         expect(screen.getByLabelText('Map')).toBeInTheDocument();
         expect(screen.getByLabelText('Schedule')).toBeInTheDocument();
@@ -123,19 +123,19 @@ describe('Root layout - mobile', () => {
     });
 
     it('renders hamburger menu on mobile', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         expect(screen.getByLabelText('Open menu')).toBeInTheDocument();
     });
 
     it('highlights active tab', () => {
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         const homeBtn = screen.getByLabelText('Home');
         expect(homeBtn.getAttribute('aria-current')).toBe('page');
     });
 
     it('opens slide-over menu when hamburger clicked', async () => {
         const user = userEvent.setup();
-        renderWithRouter('/openmower');
+        renderWithRouter('/mowglinext');
         await user.click(screen.getByLabelText('Open menu'));
         expect(screen.getByLabelText('Close menu')).toBeInTheDocument();
     });

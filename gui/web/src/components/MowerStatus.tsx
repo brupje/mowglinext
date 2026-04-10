@@ -105,7 +105,7 @@ export const MowerStatus = () => {
             const res = await guiApi.containers.containersList();
             if (res.error) throw new Error(res.error.error);
             const container = res.data.containers?.find(
-                (c) => c.labels?.app === "openmower" || c.names?.includes("/openmower")
+                (c) => c.labels?.app === "mowglinext" || c.names?.includes("/mowglinext")
             );
             if (container?.id) {
                 const cmdRes = await guiApi.containers.containersCreate(container.id, "restart");

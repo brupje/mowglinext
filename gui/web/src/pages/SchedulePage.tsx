@@ -46,7 +46,7 @@ export const SchedulePage = () => {
     );
 
     useEffect(() => {
-        mapStream.start("/api/openmower/subscribe/map");
+        mapStream.start("/api/mowglinext/subscribe/map");
         return () => { mapStream.stop(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);

@@ -17,7 +17,7 @@ export const useDockingSensor = () => {
             setDockingSensor(JSON.parse(e))
         })
     useEffect(() => {
-        dockingSensorStream.start("/api/openmower/subscribe/dockingSensor",)
+        dockingSensorStream.start("/api/mowglinext/subscribe/dockingSensor",)
         return () => {
             dockingSensorStream.stop()
         }

@@ -31,7 +31,7 @@ export function useManualMode({mowerAction, joyStream}: UseManualModeOptions) {
     const handleManualMode = async () => {
         // Start the joy WebSocket immediately so it's ready when the user moves the joystick.
         // Don't wait for the MANUAL_MOWING state to propagate back via highLevelStatus.
-        joyStream.start("/api/openmower/publish/joy");
+        joyStream.start("/api/mowglinext/publish/joy");
         await mowerAction("high_level_control", {Command: 7})();
         // Enable mowing blade immediately, then keep it alive every 10s
         await mowerAction("mow_enabled", {MowEnabled: 1, MowDirection: 0})();

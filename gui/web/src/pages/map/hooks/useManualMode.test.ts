@@ -37,7 +37,7 @@ describe('useManualMode', () => {
         await act(async () => {
             await result.current.handleManualMode();
         });
-        expect(startStream).toHaveBeenCalledWith('/api/openmower/publish/joy');
+        expect(startStream).toHaveBeenCalledWith('/api/mowglinext/publish/joy');
         expect(mowerAction).toHaveBeenCalledWith('high_level_control', {Command: 7});
         expect(mowerAction).toHaveBeenCalledWith('mow_enabled', {MowEnabled: 1, MowDirection: 0});
         expect(result.current.manualMode).toBeDefined();

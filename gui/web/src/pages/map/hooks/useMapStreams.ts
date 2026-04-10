@@ -386,14 +386,14 @@ export function useMapStreams({
             ) {
                 return;
             }
-            highLevelStatus.start("/api/openmower/subscribe/highLevelStatus");
-            poseStream.start("/api/openmower/subscribe/pose");
-            mapStream.start("/api/openmower/subscribe/map");
-            pathStream.start("/api/openmower/subscribe/path");
-            planStream.start("/api/openmower/subscribe/plan");
-            lidarStream.start("/api/openmower/subscribe/lidar");
-            obstaclesStream.start("/api/openmower/subscribe/obstacles");
-            coverageCellsStream.start("/api/openmower/subscribe/coverageCells");
+            highLevelStatus.start("/api/mowglinext/subscribe/highLevelStatus");
+            poseStream.start("/api/mowglinext/subscribe/pose");
+            mapStream.start("/api/mowglinext/subscribe/map");
+            pathStream.start("/api/mowglinext/subscribe/path");
+            planStream.start("/api/mowglinext/subscribe/plan");
+            lidarStream.start("/api/mowglinext/subscribe/lidar");
+            obstaclesStream.start("/api/mowglinext/subscribe/obstacles");
+            coverageCellsStream.start("/api/mowglinext/subscribe/coverageCells");
         }
     }, [editMap]);
 
@@ -401,8 +401,8 @@ export function useMapStreams({
     useEffect(() => {
         const stateName = highLevelStatus.highLevelStatus.StateName;
         if (stateName === "RECORDING" || stateName === "AREA_RECORDING") {
-            joyStream.start("/api/openmower/publish/joy");
-            recordingTrajectoryStream.start("/api/openmower/subscribe/recordingTrajectory");
+            joyStream.start("/api/mowglinext/publish/joy");
+            recordingTrajectoryStream.start("/api/mowglinext/subscribe/recordingTrajectory");
             setEditMap(false);
             return;
         }
@@ -424,14 +424,14 @@ export function useMapStreams({
         ) {
             return;
         }
-        highLevelStatus.start("/api/openmower/subscribe/highLevelStatus");
-        poseStream.start("/api/openmower/subscribe/pose");
-        mapStream.start("/api/openmower/subscribe/map");
-        pathStream.start("/api/openmower/subscribe/path");
-        planStream.start("/api/openmower/subscribe/plan");
-        lidarStream.start("/api/openmower/subscribe/lidar");
-        obstaclesStream.start("/api/openmower/subscribe/obstacles");
-        coverageCellsStream.start("/api/openmower/subscribe/coverageCells");
+        highLevelStatus.start("/api/mowglinext/subscribe/highLevelStatus");
+        poseStream.start("/api/mowglinext/subscribe/pose");
+        mapStream.start("/api/mowglinext/subscribe/map");
+        pathStream.start("/api/mowglinext/subscribe/path");
+        planStream.start("/api/mowglinext/subscribe/plan");
+        lidarStream.start("/api/mowglinext/subscribe/lidar");
+        obstaclesStream.start("/api/mowglinext/subscribe/obstacles");
+        coverageCellsStream.start("/api/mowglinext/subscribe/coverageCells");
     }, [settings]);
 
     // Cleanup all streams on unmount

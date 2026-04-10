@@ -9,12 +9,12 @@ export const SettingsPage = () => {
     const guiApi = useApi();
     const { notification } = App.useApp();
 
-    const restartOpenMower = async () => {
+    const restartMowgliNext = async () => {
         try {
             const resContainersList = await guiApi.containers.containersList();
             if (resContainersList.error) throw new Error(resContainersList.error.error);
             const container = resContainersList.data.containers?.find(
-                (c) => c.labels?.app === "openmower" || c.names?.includes("/openmower")
+                (c) => c.labels?.app === "mowglinext" || c.names?.includes("/mowglinext")
             );
             if (container?.id) {
                 const res = await guiApi.containers.containersCreate(container.id, "restart");
@@ -53,7 +53,7 @@ export const SettingsPage = () => {
             label: "Mower Configuration",
             children: (
                 <SchemaSettingsComponent
-                    onRestartOM={restartOpenMower}
+                    onRestartOM={restartMowgliNext}
                     onRestartGUI={restartGui}
                 />
             ),
