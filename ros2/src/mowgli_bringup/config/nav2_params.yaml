@@ -7,7 +7,7 @@ bt_navigator:
   ros__parameters:
     use_sim_time: false
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /wheel_odom
     bt_loop_duration: 10
     default_server_timeout: 60
@@ -36,15 +36,15 @@ controller_server:
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
-    failure_tolerance: 5.0
+    failure_tolerance: 1.0
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["stopped_goal_checker", "coverage_goal_checker"]
     controller_plugins: ["FollowPath", "FollowCoveragePath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.02  # tight — even small movements count
-      movement_time_allowance: 3600.0 # 1 hour — effectively disabled for long coverage runs
+      required_movement_radius: 0.15  # must move 15cm to count as progress
+      movement_time_allowance: 30.0  # seconds without progress before controller fails
 
     stopped_goal_checker:
       plugin: "nav2_controller::StoppedGoalChecker"
@@ -70,14 +70,14 @@ controller_server:
       rotate_to_heading_angular_vel: 3.0
       max_angular_accel: 5.0
       # RPP parameters (passed through to primary controller)
-      desired_linear_vel: 0.3
+      desired_linear_vel: 0.2
       lookahead_dist: 0.4
       min_lookahead_dist: 0.2
       max_lookahead_dist: 0.6
       lookahead_time: 1.5
       transform_tolerance: 2.0
       use_velocity_scaled_lookahead_dist: false
-      min_approach_linear_velocity: 0.05
+      min_approach_linear_velocity: 0.1
       approach_velocity_scaling_dist: 0.6
       use_collision_detection: false
       use_regulated_linear_velocity_scaling: true
@@ -85,7 +85,7 @@ controller_server:
       curvature_lookahead_dist: 0.6
       use_cost_regulated_linear_velocity_scaling: false
       regulated_linear_scaling_min_radius: 0.9
-      regulated_linear_scaling_min_speed: 0.1
+      regulated_linear_scaling_min_speed: 0.15
       use_rotate_to_heading: false
       allow_reversing: false
       max_angular_vel: 3.0
@@ -96,7 +96,7 @@ controller_server:
     # PRE_ROTATE -> FOLLOWING -> WAITING_FOR_GOAL_APPROACH -> POST_ROTATE
     FollowCoveragePath:
       plugin: "mowgli_nav2_plugins/FTCController"
-      speed_fast: 0.4              # carrot speed when far from path (m/s)
+      speed_fast: 0.3              # carrot speed when far from path (m/s)
       speed_fast_threshold: 0.5    # distance threshold for fast/slow (m)
       speed_fast_threshold_angle: 10.0  # angle threshold for fast (deg)
       speed_slow: 0.15             # carrot speed when close/turning (m/s)
@@ -115,7 +115,7 @@ controller_server:
       ki_ang: 0.0
       kd_ang: 0.0
       # Limits
-      max_cmd_vel_speed: 0.4
+      max_cmd_vel_speed: 0.3
       max_cmd_vel_ang: 3.0
       max_goal_distance_error: 0.10  # goal reached within 10cm
       max_goal_angle_error: 15.0     # goal angle tolerance (deg)
@@ -136,10 +136,10 @@ planner_server:
     GridBased:
       plugin: "nav2_smac_planner::SmacPlanner2D"
       tolerance: 0.50
-      downsample_costmap: false
-      downsampling_factor: 1
+      downsample_costmap: true
+      downsampling_factor: 2
       allow_unknown: false
-      max_iterations: 1000000
+      max_iterations: 100000
       max_on_approach_iterations: 1000
       max_planning_time: 3.5
       cost_travel_multiplier: 2.0
@@ -184,7 +184,7 @@ behavior_server:
     assisted_teleop:
       plugin: "nav2_behaviors::AssistedTeleop"
     global_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_tolerance: 0.5
     simulate_ahead_time: 2.0
     max_rotational_vel: 3.0
@@ -219,7 +219,7 @@ velocity_smoother:
     #             twist_mux → cmd_vel → hardware
     input_topic: cmd_vel_nav
     output_topic: cmd_vel_smoothed
-    max_velocity: [0.4, 0.0, 1.0]
+    max_velocity: [0.3, 0.0, 1.0]
     min_velocity: [-0.3, 0.0, -1.0]
     max_accel: [0.3, 0.0, 1.5]
     max_decel: [-0.3, 0.0, -1.5]
@@ -235,10 +235,10 @@ global_costmap:
   global_costmap:
     ros__parameters:
       use_sim_time: false
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      update_frequency: 0.5
+      publish_frequency: 0.5
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       # TF tolerance: how stale a transform can be before the costmap rejects it.
       # Keep this short — stale TF after SLAM corrections projects scans into
       # wrong cells, creating phantom obstacles.  SLAM init delay is handled by
@@ -255,14 +255,15 @@ global_costmap:
       # gardens: the costmap always centres on the robot, and obstacles are
       # detected in real time by the obstacle_layer.
       rolling_window: true
-      width: 200
-      height: 200
-      # keepout_filter disabled in global costmap: it marks boundary zones
-      # as LETHAL causing "Start occupied" when robot is near boundary edge.
-      # Boundary enforcement uses local costmap keepout + coverage planner.
+      width: 30
+      height: 30
+      # keepout_filter re-enabled: the keepout mask now includes a navigation
+      # margin (keepout_nav_margin param) so the robot can operate near the
+      # boundary edge without triggering "Start occupied".
+      # keepout_filter disabled: LETHAL outside mowing area blocks transit
+      # and docking routes. Boundary enforcement via coverage planner only.
       plugins: ["obstacle_layer", "inflation_layer"]
 
-      # Keepout filter config kept for reference but not in plugins list.
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: true
@@ -280,17 +281,20 @@ global_costmap:
           data_type: "LaserScan"
           raytrace_max_range: 8.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 7.5
-          obstacle_min_range: 0.35
+          obstacle_max_range: 5.0
+          # Garden-tuned: ignore returns closer than 0.5m to filter grass
+          # tufts and ground clutter near the LiDAR (mounted at ~0.38m fwd).
+          obstacle_min_range: 0.50
           inf_is_valid: true
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # Tight inflation: just enough for SmacPlanner2D safety margin.
-        # 0.30m ≈ robot half-width (0.27m) + small buffer. Keeps transit
-        # paths close to obstacles without losing too much mowing area.
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.40
+        # Garden-tuned: steep cost drop-off (10.0) means cost decays fast
+        # with distance, so only cells very close to obstacles are costly.
+        # Small inflation radius (0.25m) avoids detours around grass tufts
+        # while still keeping the robot from scraping real obstacles.
+        cost_scaling_factor: 10.0
+        inflation_radius: 0.25
 
 # ---------------------------------------------------------------------------
 # Local costmap
@@ -302,7 +306,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 2.0
       global_frame: odom
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       footprint: "[[0.45, 0.20], [0.45, -0.20], [-0.09, -0.20], [-0.09, 0.20]]"
       resolution: 0.05
       rolling_window: true
@@ -316,18 +320,6 @@ local_costmap:
       # on the same mask infrastructure.
       plugins: ["obstacle_layer", "inflation_layer"]
 
-      # Keepout filter config kept for reference but not in plugins list.
-      keepout_filter:
-        plugin: "nav2_costmap_2d::KeepoutFilter"
-        enabled: true
-        filter_info_topic: "/costmap_filter_info"
-
-      # Speed filter config kept for reference but not in plugins list.
-      speed_filter:
-        plugin: "nav2_costmap_2d::SpeedFilter"
-        enabled: true
-        filter_info_topic: "/speed_filter_info"
-
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
@@ -338,19 +330,16 @@ local_costmap:
           clearing: true
           marking: true
           data_type: "LaserScan"
-          # 150 deg FOV centred forward, 8 m range
           raytrace_max_range: 8.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 7.5
-          obstacle_min_range: 0.35
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.50
           inf_is_valid: true
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        # Tight inflation for local costmap: robot half-width + small margin.
-        # Minimizes unmowed area around obstacles during coverage.
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.40
+        cost_scaling_factor: 10.0
+        inflation_radius: 0.25
 
 # ---------------------------------------------------------------------------
 # Map server / AMCL (not used with slam_toolbox, kept for completeness)
@@ -381,7 +370,7 @@ docking_server:
     undock_linear_tolerance: 0.05
     undock_angular_tolerance: 0.1
     max_retries: 3
-    base_frame: base_link
+    base_frame: base_footprint
     fixed_frame: odom
     dock_backwards: false
     dock_prestaging_tolerance: 0.5
@@ -395,7 +384,11 @@ docking_server:
     simple_charging_dock:
       plugin: "opennav_docking::SimpleChargingDock"
       charging_threshold: 0.1
-      docking_threshold: 0.05
+      # Geometric distance (m) from base_link to dock pose for isDocked().
+      # Must accommodate SLAM relocalization drift — lifelong SLAM can
+      # place the robot several metres from the configured dock pose
+      # after loading a saved map with heading mismatch.
+      docking_threshold: 0.5
       staging_x_offset: -1.0
       use_external_detection_pose: false
       use_battery_status: true
@@ -409,53 +402,59 @@ docking_server:
 collision_monitor:
   ros__parameters:
     use_sim_time: false
-    base_frame_id: base_link
+    base_frame_id: base_footprint
     odom_frame_id: odom
     cmd_vel_in_topic: cmd_vel_smoothed
     cmd_vel_out_topic: cmd_vel_monitored
     state_topic: collision_monitor_state
     transform_tolerance: 0.2
-    source_timeout: 1.0
+    # Source timeout: how long before stale sensor data triggers a stop.
+    # ARM boards can have TF/scan timing jitter — 5s avoids false stops
+    # while still catching genuinely dead sensors.
+    source_timeout: 5.0
     base_shift_correction: true
     stop_pub_timeout: 2.0
     polygons: ["PolygonStop", "PolygonSlow", "FootprintApproach"]
     # Stop zone: tight safety box matching the robot footprint.
-    # front 0.45m, rear -0.09m, width +/-0.20m.
+    # Garden-tuned: min_points=8 prevents grass/ground clutter from triggering
+    # emergency stop — requires a solid cluster to confirm a real obstacle.
     PolygonStop:
       type: "polygon"
       points: "[[0.45, 0.20], [0.45, -0.20], [-0.09, -0.20], [-0.09, 0.20]]"
       action_type: "stop"
-      min_points: 2
+      min_points: 8
       visualize: true
       polygon_pub_topic: "polygon_stop"
       enabled: true
-    # Slowdown zone: extends 0.30m beyond the robot front for early braking.
-    # front 0.75m (0.45 + 0.30), rear -0.09m, width +/-0.30m.
+    # Slowdown zone: extends 0.25m beyond the robot front for early braking.
+    # Garden-tuned: min_points=6 filters scattered grass returns.
     PolygonSlow:
       type: "polygon"
-      points: "[[0.75, 0.30], [0.75, -0.30], [-0.09, -0.30], [-0.09, 0.30]]"
+      points: "[[0.70, 0.25], [0.70, -0.25], [-0.09, -0.25], [-0.09, 0.25]]"
       action_type: "slowdown"
       slowdown_ratio: 0.5
-      min_points: 2
+      min_points: 6
       visualize: true
       polygon_pub_topic: "polygon_slow"
       enabled: true
     # Approach: uses dynamic robot footprint with velocity projection.
-    # Gradually slows when predicted collision is within time_before_collision.
     FootprintApproach:
       type: "polygon"
       action_type: "approach"
       footprint_topic: "/local_costmap/published_footprint"
       time_before_collision: 2.0
       simulation_time_step: 0.05
-      min_points: 1
+      min_points: 2
       visualize: true
       enabled: true
     observation_sources: ["scan"]
     scan:
       type: "scan"
       topic: /scan
-      min_height: 0.15
+      # Garden-tuned: 0.20m min_height filters grass and ground clutter.
+      # The LD19 LiDAR is mounted at 0.22m height, so returns below 0.20m
+      # are almost certainly ground or grass, not real obstacles.
+      min_height: 0.20
       max_height: 2.0
       enabled: true
 
