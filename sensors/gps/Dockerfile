@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-ntrip-client \
     ros-jazzy-rtcm-msgs \
     ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-nmea-navsat-driver \
  && rm -rf /var/lib/apt/lists/*
 
 COPY ros2_entrypoint.sh /ros2_entrypoint.sh
