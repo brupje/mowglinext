@@ -6,10 +6,7 @@
 // (at your option) any later version.
 /**
  * @file slam_heading_node.hpp
- * @brief Extracts heading from SLAM's /pose topic for EKF fusion.
- *
- * SLAM publishes /pose independently of TF (even with transform_publish_period=0).
- * This node extracts yaw and republishes for ekf_map heading correction.
+ * @brief Extracts heading from SLAM's map→odom TF for EKF fusion.
  */
 
 #pragma once
@@ -18,6 +15,8 @@
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
 
 namespace mowgli_localization
 {
@@ -29,14 +28,18 @@ public:
   ~SlamHeadingNode() override = default;
 
 private:
-  void on_slam_pose(geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg);
+  void timer_callback();
 
+  double publish_rate_{5.0};
   double yaw_variance_{0.05};
   double stale_timeout_{5.0};
   double stale_yaw_variance_{1e6};
 
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr heading_pub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr slam_pose_sub_;
+  rclcpp::TimerBase::SharedPtr timer_;
 };
 
 }  // namespace mowgli_localization
