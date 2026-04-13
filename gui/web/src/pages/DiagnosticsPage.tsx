@@ -124,7 +124,11 @@ export const DiagnosticsPage = () => {
     const cpuTemp = snapshot?.system?.cpu_temperature ?? 0;
 
     const alerts = useMemo(
-        () => (diagnostics.status ?? []).filter(s => s.level >= 1),
+        () => (diagnostics.status ?? []).filter(s =>
+            s.level >= 1 &&
+            // Filter out transient "no data since last update" from ublox driver
+            !s.message?.toLowerCase().includes("no data since last update")
+        ),
         [diagnostics.status]
     );
 
