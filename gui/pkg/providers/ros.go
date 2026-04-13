@@ -32,6 +32,7 @@ var topicMap = map[string]topicDef{
 	"gps":                 {"/gps/absolute_pose", "mowgli_interfaces/msg/AbsolutePose"},
 	"pose":                {"/fusion/odom", "nav_msgs/msg/Odometry"},
 	"fusionRaw":           {"/fusion/odom", "nav_msgs/msg/Odometry"},
+	"btLog":               {"/behavior_tree_log", "nav2_msgs/msg/BehaviorTreeLog"},
 	"imu":                 {"/imu/data", "sensor_msgs/msg/Imu"},
 	"ticks":               {"/wheel_odom", "nav_msgs/msg/Odometry"},
 	"map":                 {"", ""},                                                            // virtual – populated via map_server services

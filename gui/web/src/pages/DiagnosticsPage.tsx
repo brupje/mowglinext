@@ -34,6 +34,7 @@ import {usePower} from "../hooks/usePower.ts";
 import {useStatus} from "../hooks/useStatus.ts";
 import {useGPS} from "../hooks/useGPS.ts";
 import {useFusionOdom} from "../hooks/useFusionOdom.ts";
+import {useBTLog} from "../hooks/useBTLog.ts";
 import {useImu} from "../hooks/useImu.ts";
 import {useWheelTicks} from "../hooks/useWheelTicks.ts";
 import {useDiagnosticsSnapshot} from "../hooks/useDiagnosticsSnapshot.ts";
@@ -66,6 +67,16 @@ function secondsAgo(timestamp: string): number {
 
 const DIAG_LEVEL_COLORS: Record<number, string> = {0: "success", 1: "warning", 2: "error", 3: "default"};
 const DIAG_LEVEL_LABELS: Record<number, string> = {0: "OK", 1: "WARN", 2: "ERROR", 3: "STALE"};
+
+// ESC status codes from mowgli_interfaces/msg/ESCStatus.msg
+const ESC_STATUS: Record<number, {label: string; color: string}> = {
+    0:   {label: "Off", color: "default"},
+    99:  {label: "Disconnected", color: "warning"},
+    100: {label: "Error", color: "error"},
+    150: {label: "Stalled", color: "error"},
+    200: {label: "OK", color: "success"},
+    201: {label: "Running", color: "success"},
+};
 
 function formatBytes(bytes: number): string {
     if (bytes <= 0) return "0 B";
@@ -105,6 +116,7 @@ export const DiagnosticsPage = () => {
     const status = useStatus();
     const gps = useGPS();
     const pose = useFusionOdom();
+    const btNodeStates = useBTLog();
     const imu = useImu();
     const wheelTicks = useWheelTicks();
     const {snapshot, loading, refresh} = useDiagnosticsSnapshot();
@@ -498,6 +510,24 @@ export const DiagnosticsPage = () => {
                             </Tag>
                         </Space>
                     </div>
+                    {btNodeStates.size > 0 && (
+                        <div style={{marginTop: 12}}>
+                            <Typography.Text type="secondary" style={{fontSize: 12, display: "block", marginBottom: 4}}>Active BT Nodes</Typography.Text>
+                            <Flex wrap gap={4}>
+                                {Array.from(btNodeStates.entries())
+                                    .filter(([, status]) => status === "RUNNING" || status === "SUCCESS")
+                                    .map(([name, status]) => (
+                                        <Tag
+                                            key={name}
+                                            color={status === "RUNNING" ? "processing" : status === "SUCCESS" ? "success" : "default"}
+                                            style={{fontSize: 11}}
+                                        >
+                                            {name}
+                                        </Tag>
+                                    ))}
+                            </Flex>
+                        </div>
+                    )}
                 </Card>
             </Col>
             <Col xs={24} lg={12}>
@@ -804,13 +834,11 @@ export const DiagnosticsPage = () => {
                         <Col xs={12} lg={4}>
                             <Statistic
                                 title="ESC Status"
-                                value={escStatusLabel(status.mower_esc_status)}
+                                value={(ESC_STATUS[status.mower_esc_status ?? 0] ?? {label: `Unknown (${status.mower_esc_status})`}).label}
                                 valueStyle={{
-                                    color: status.mower_esc_status === 200 || status.mower_esc_status === 201
-                                        ? undefined
-                                        : status.mower_esc_status != null
-                                            ? colors.danger
-                                            : undefined,
+                                    color: ESC_STATUS[status.mower_esc_status ?? 0]?.color === "error" ? colors.danger
+                                        : ESC_STATUS[status.mower_esc_status ?? 0]?.color === "warning" ? colors.warning
+                                        : undefined,
                                 }}
                             />
                         </Col>
