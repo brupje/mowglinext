@@ -84,9 +84,9 @@ RMW_IMPLEMENTATION: rmw_fastrtps_cpp
 RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
 ```
 
-#### 3. Publishing TF from EKF
+#### 3. SLAM as TF Authority
 
-AI may suggest enabling `publish_tf: true` on ekf_map. **Don't.** SLAM Toolbox is the sole TF authority for map→odom.
+AI may suggest having multiple nodes publish the same TF transforms. **Don't.** SLAM Toolbox is the sole TF authority for `map→odom` (20 Hz via scan matching). FusionCore publishes `odom→base_footprint` only.
 
 #### 4. MPPI Controller for Coverage
 

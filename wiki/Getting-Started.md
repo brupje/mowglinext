@@ -50,7 +50,7 @@ The fastest way to explore and develop MowgliNext — no local setup required:
 
 The devcontainer provides a complete ROS2 Jazzy development environment:
 
-- Full Nav2 navigation stack, SLAM Toolbox, robot_localization
+- Full Nav2 navigation stack, SLAM Toolbox, FusionCore (UKF sensor fusion)
 - Gazebo Harmonic simulation (headless)
 - B-RV coverage planner (mowgli_brv_planner)
 - Foxglove Bridge + rosbridge for visualization

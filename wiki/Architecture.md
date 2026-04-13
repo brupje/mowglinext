@@ -66,7 +66,7 @@ Mowgli ROS2 is organized as a **12-package ecosystem** with clear separation of 
 |---------|---------|--------------|
 | **mowgli_interfaces** | Message, service, and action type definitions | ROS2 core |
 | **mowgli_hardware** | Serial bridge to STM32 firmware (COBS + CRC-16 protocol) | mowgli_interfaces |
-| **mowgli_localization** | Multi-source localization (wheel odometry, IMU, RTK-GPS fusion, EKF) | mowgli_interfaces, robot_localization |
+| **mowgli_localization** | Multi-source localization (wheel odometry, IMU, RTK-GPS fusion via FusionCore UKF) | mowgli_interfaces, fusioncore_cpp |
 | **mowgli_nav2_plugins** | Nav2 controller plugins (FTC, RPP + RotationShimController, goal checkers) | nav2_core, mowgli_interfaces |
 | **mowgli_brv_planner** | Coverage path planning using B-RV algorithm (MBB sweep direction, grid-based boustrophedon, Voronoi roadmap transit) | mowgli_interfaces, nav_msgs |
 | **mowgli_behavior** | Reactive behavior tree control (BehaviorTree.CPP v4) | mowgli_interfaces, nav2_msgs |
@@ -449,41 +449,45 @@ Inputs:
 
 ↓
 
-three_nodes:
+Source nodes:
 
 1) wheel_odometry_node
    - Integrates RL/RR encoder ticks
    - Publishes /wheel_odom (Odometry)
    - 50 Hz
 
-2) gps_pose_converter_node
-   - RTK fix → local ENU pose
-   - Publishes /gps/pose (PoseWithCovarianceStamped)
+2) navsat_to_absolute_pose_node
+   - RTK fix → local ENU pose (for GUI and BT reference only)
+   - Publishes /gps/absolute_pose (PoseWithCovarianceStamped)
    - Variable rate (10-20 Hz depending on RTK health)
 
 3) localization_monitor_node
-   - Monitors EKF variance
+   - Monitors FusionCore variance
    - Detects degradation (5 modes)
    - Publishes /localization/status (DiagnosticStatus)
 
 ↓
 
-Inputs to robot_localization (launched by mowgli_bringup):
+FusionCore Sensor Fusion (launched by mowgli_bringup):
 
-1) ekf_odom node (50 Hz)
-   - Fuses: /wheel_odom + /imu/data
-   - Output: /odometry/filtered_odom (odom → base_link)
+FusionCore node (50 Hz, single UKF)
+   - Fuses: /wheel_odom + /imu/data + /gps/fix (NavSatFix directly)
+   - Output: /fusion/odom (nav_msgs/Odometry, odom → base_footprint)
+   - Publishes TF: odom → base_footprint
 
-2) ekf_map node (20 Hz)
-   - Fuses: /odometry/filtered_odom + /gps/pose
-   - Output: /odometry/filtered_map (map → odom)
+↓
+
+SLAM Toolbox (20 Hz):
+   - Fuses: /scan + /fusion/odom
+   - Output: /map (occupancy grid)
+   - Publishes TF: map → odom (TF authority for map→odom)
 
 ↓
 
 Final Output:
-  /tf tree: map → odom → base_link
-  /odometry/filtered_odom (local estimate)
-  /odometry/filtered_map (global estimate with GPS correction)
+  /tf tree: map → odom → base_footprint
+  /fusion/odom (sensor fusion result, both local and GPS-corrected)
+  /map (occupancy grid from SLAM)
 ```
 
 #### 3a. wheel_odometry_node
@@ -535,25 +539,27 @@ wheel_odometry:
     timeout_period_ms: 5000            # Warn if no WheelTick for 5s
 ```
 
-#### 3b. gps_pose_converter_node
+#### 3b. navsat_to_absolute_pose_node
 
 **Inputs:**
 - `/gps/rtk_fix` (sensor_msgs/NavSatFix with fix type indicator)
 
 **Outputs:**
-- `/gps/pose` (geometry_msgs/PoseWithCovarianceStamped)
+- `/gps/absolute_pose` (geometry_msgs/PoseWithCovarianceStamped)
+
+**Purpose:** Convert NavSatFix (latitude/longitude) to local ENU pose for GUI visualization and Behavior Tree reference. Note that FusionCore fuses `/gps/fix` directly (no intermediate converter).
 
 **Algorithm: GNSS to Local ENU**
 
 ```
-1. First fix sets local origin (lat0, lon0, alt0)
-2. All subsequent fixes converted to ENU relative to origin:
+1. GPS origin (datum) set from mowgli_robot.yaml (datum_lat, datum_long)
+2. All fixes converted to ENU relative to datum origin:
 
-   Δlat = lat - lat0
-   Δlon = lon - lon0
-   Δalt = alt - alt0
+   Δlat = lat - datum_lat
+   Δlon = lon - datum_long
+   Δalt = alt - datum_alt
 
-   e = EARTH_RADIUS_M * Δlon * cos(lat0)
+   e = EARTH_RADIUS_M * Δlon * cos(datum_lat)
    n = EARTH_RADIUS_M * Δlat
    u = Δalt
 
@@ -566,22 +572,19 @@ wheel_odometry:
    No fix:        skip publishing
 ```
 
-**Parameters (gps_pose_converter.yaml):**
+**Parameters (navsat_to_absolute_pose.yaml):**
 ```yaml
-gps_pose_converter:
+navsat_to_absolute_pose:
   ros__parameters:
     map_frame_id: "map"
     earth_radius_m: 6371008.8
-    origin_lat: 0.0                   # Set on first fix if not specified
-    origin_lon: 0.0
-    origin_alt: 0.0
+    # Datum origin read from mowgli_robot.yaml
 ```
 
 #### 3c. localization_monitor_node
 
 **Inputs:**
-- `/odometry/filtered_odom` (from ekf_odom)
-- `/odometry/filtered_map` (from ekf_map)
+- `/fusion/odom` (from FusionCore UKF)
 - `/status` (for wheel tick freshness)
 - `/gps/rtk_fix` (for fix status)
 
@@ -593,11 +596,11 @@ gps_pose_converter:
 
 | Level | Name | Condition | Response |
 |-------|------|-----------|----------|
-| 0 | OK | EKF healthy, all sensors fresh | Continue normally |
+| 0 | OK | FusionCore healthy, all sensors fresh | Continue normally |
 | 1 | ODOMETRY_STALE | No wheel ticks for 2s | Warn in logs, reduce planner timeout |
-| 2 | GPS_TIMEOUT | No fix for 10s (RTK Float OK) | Use odom-only, increase drift tolerance |
+| 2 | GPS_TIMEOUT | No fix for 10s (RTK Float OK) | Use wheel odom only, increase drift tolerance |
 | 3 | GPS_DEGRADED | RTK Float (not Fixed) | Use GPS but with higher variance |
-| 4 | FILTER_DIVERGENCE | EKF variance > threshold | Emergency stop recommended |
+| 4 | FILTER_DIVERGENCE | FusionCore variance > threshold | Emergency stop recommended |
 
 **Parameters (localization_monitor.yaml):**
 ```yaml
@@ -605,7 +608,7 @@ localization_monitor:
   ros__parameters:
     odom_stale_timeout_sec: 2.0
     gps_timeout_sec: 10.0
-    max_acceptable_ekf_variance: 0.25   # m² for position
+    max_acceptable_fusion_variance: 0.25   # m² for position
 ```
 
 ---
@@ -662,15 +665,17 @@ base_footprint (on ground, fixed to base_link)
 ```
 Map frame (SLAM origin)
     │
-    ├── [ekf_map output]
+    ├── [SLAM Toolbox publishes map→odom @ 20 Hz]
     │
-Odometry frame (local origin)
+Odometry frame (local dead-reckoning origin)
     │
-    ├── [ekf_odom output]
+    ├── [FusionCore publishes odom→base_footprint @ 50 Hz]
     │
-Base link (robot centre)
+Base footprint (on ground, robot frame for Nav2/FusionCore)
     │
-    ├── [robot_state_publisher outputs]
+    ├── [robot_state_publisher outputs static TFs]
+    │
+Base link (rear wheel axle, OpenMower convention)
     │
 Sensor frames:
     ├── imu_link (IMU data frame)
@@ -687,8 +692,9 @@ Starts:
 1. `robot_state_publisher` – Processes URDF/xacro, publishes robot_description and static TFs
 2. `hardware_bridge_node` – Serial bridge to STM32
 3. `twist_mux` – Priority-based cmd_vel multiplexer
-4. `robot_localization` (dual EKF) – Wheel odometry fusion
-5. (Optional) SLAM, Nav2, behavior tree nodes
+4. `FusionCore` (single UKF, lifecycle node) – Wheel odometry + IMU + GPS fusion
+5. `wheel_odometry_node`, `imu_filter_madgwick`, `navsat_to_absolute_pose_node`, `localization_monitor_node` – Sensor preparation
+6. (Optional) SLAM, Nav2, behavior tree nodes
 
 **simulation.launch.py** – Gazebo Ignition
 
@@ -1642,21 +1648,15 @@ foxglove_bridge:
      ├─ Fuses IMU gyro + accel
      └─→ /imu/data (filtered orientation)
 
-   robot_localization (ekf_odom, 50 Hz):
-     ├─ Fuses /wheel_odom + /imu/data
-     ├─ Output: /odometry/filtered_odom (local estimate, odom frame)
-     └─→ /tf: odom → base_link
+   FusionCore (single UKF, 50 Hz):
+     ├─ Fuses /wheel_odom + /imu/data + /gps/fix (NavSatFix directly)
+     ├─ Output: /fusion/odom (sensor fusion result, odom → base_footprint)
+     └─→ /tf: odom → base_footprint
 
-   GPS fusion (ekf_map, 20 Hz, if RTK fix):
-     ├─ /gps/rtk_fix → gps_pose_converter → /gps/pose (ENU)
-     ├─ Fuses /odometry/filtered_odom + /gps/pose
-     ├─ Output: /odometry/filtered_map (global estimate, map frame)
-     └─→ /tf: map → odom (corrects drift)
-
-   SLAM (slam_toolbox, async):
-     ├─ /scan + /odometry/filtered_odom
+   SLAM (slam_toolbox, 20 Hz):
+     ├─ /scan + /fusion/odom
      ├─ Output: /map (occupancy grid)
-     └─→ /tf: map → odom (loop closure correction)
+     └─→ /tf: map → odom (scan matching + loop closure, TF authority)
 
    FTCController (10 Hz, coverage) / RPP Controller (10 Hz, transit):
      ├─ Reads robot pose from /tf: odom → base_link
@@ -1707,7 +1707,8 @@ foxglove_bridge:
 
 11. Telemetry (Foxglove Bridge, 8765/ws):
     → Web UI receives:
-       ├─ /odometry/filtered_map (robot pose on map)
+       ├─ /fusion/odom (robot pose from sensor fusion)
+       ├─ /map (occupancy grid from SLAM)
        ├─ /coverage_path and /coverage_outline (visualization)
        ├─ /scan (LiDAR pointcloud)
        ├─ /diagnostics (system health)
@@ -1722,16 +1723,16 @@ foxglove_bridge:
 
 ```
 map (SLAM origin, or GPS-corrected)
-  │ [published by ekf_map in robot_localization @ 20 Hz]
+  │ [published by SLAM Toolbox @ 20 Hz]
   │
   odom (local dead-reckoning origin)
-  │ [published by ekf_odom in robot_localization @ 50 Hz]
+  │ [published by FusionCore @ 50 Hz]
   │
-  base_link (robot body frame, wheel axle height)
-  │ [published by robot_state_publisher from URDF]
+  base_footprint (on ground, robot frame for Nav2/FusionCore)
+  │ [published by FusionCore from URDF]
   │
-  ├── base_footprint (ground contact point, fixed offset from base_link)
-  │   └── used by Nav2 costmap for footprint inflation
+  ├── base_link (robot body frame, wheel axle height per OpenMower convention)
+  │   └── [published by robot_state_publisher from URDF]
   │
   ├── imu_link (fixed to chassis, IMU measurement frame)
   │   └── [hardware_bridge publishes IMU data in this frame]
@@ -1750,10 +1751,10 @@ map (SLAM origin, or GPS-corrected)
 
 | Frame | Publisher | Rate | Purpose |
 |-------|-----------|------|---------|
-| map | ekf_map (robot_localization) | 20 Hz | Global origin (SLAM/GPS) |
-| odom | ekf_odom (robot_localization) | 50 Hz | Local dead-reckoning origin |
-| base_link | robot_state_publisher | Static | Robot body (from URDF) |
-| base_footprint | robot_state_publisher | Static | Footprint inflation center |
+| map | SLAM Toolbox | 20 Hz | Global origin (scan matching + loop closure) |
+| odom | FusionCore | 50 Hz | Local dead-reckoning origin (wheel odometry reference) |
+| base_footprint | FusionCore | 50 Hz | On ground, robot frame for Nav2/controllers (per REP-105) |
+| base_link | robot_state_publisher | Static | Rear wheel axle (OpenMower convention) |
 | imu_link | robot_state_publisher | Static | IMU sensor frame |
 | laser_link | robot_state_publisher | Static | LiDAR origin |
 | gps_link | robot_state_publisher | Static | GPS antenna location |
@@ -1761,10 +1762,10 @@ map (SLAM origin, or GPS-corrected)
 
 **Frame Conventions:**
 
-- `map` – Global frame, typically z-up, x-east, y-north (REP-103). Set by first SLAM loop closure or GPS initial fix.
-- `odom` – Local odometry frame, z-up. Origin drifts due to integration error; corrected by ekf_map.
-- `base_link` – Robot body frame. Wheel axle height z = 0 (convention). Xy center at robot geometric center.
-- `base_footprint` – Projection of base_link onto z = 0 (ground level). Used for Nav2 footprint inflation.
+- `map` – Global frame, typically z-up, x-east, y-north (REP-103). Set by SLAM Toolbox via scan matching.
+- `odom` – Local odometry frame, z-up. Represents wheel odometry reference; drift corrected by SLAM.
+- `base_footprint` – Ground contact point, robot frame for Nav2. Published by FusionCore.
+- `base_link` – Robot body frame at rear wheel axle height (OpenMower convention). Static offset from base_footprint.
 
 **Simulation (Gazebo Harmonic):**
 
@@ -1791,9 +1792,8 @@ This allows SLAM, costmap, and other nodes to use standard ROS2 frame names rega
 | `/power` | mowgli_interfaces/Power | hardware_bridge_node | 100 Hz | Battery voltage, charging current |
 | `/wheel_odom` | nav_msgs/Odometry | wheel_odometry_node | 50 Hz | Dead-reckoning from wheel encoders |
 | `/gps/rtk_fix` | sensor_msgs/NavSatFix | GPS hardware driver | 10–20 Hz | RTK fix (latitude, longitude, altitude) |
-| `/gps/pose` | geometry_msgs/PoseWithCovarianceStamped | gps_pose_converter_node | 10–20 Hz | RTK position converted to local ENU |
-| `/odometry/filtered_odom` | nav_msgs/Odometry | ekf_odom (robot_localization) | 50 Hz | Local estimate (odom frame) |
-| `/odometry/filtered_map` | nav_msgs/Odometry | ekf_map (robot_localization) | 20 Hz | Global estimate (map frame) with GPS correction |
+| `/gps/absolute_pose` | geometry_msgs/PoseWithCovarianceStamped | navsat_to_absolute_pose_node | 10–20 Hz | RTK position converted to local ENU (for visualization) |
+| `/fusion/odom` | nav_msgs/Odometry | FusionCore | 50 Hz | Fused estimate (odom→base_footprint) with GPS+IMU+wheels |
 | `/localization/status` | diagnostic_msgs/DiagnosticStatus | localization_monitor_node | 2 Hz | EKF health, degradation mode |
 | `/coverage_planner_node/coverage_path` | nav_msgs/Path | coverage_planner_node | Once per plan | B-RV coverage path with poses |
 | `/coverage_planner_node/coverage_outline` | nav_msgs/Path | coverage_planner_node | Once per plan | Headland outline for visualization |
@@ -1809,9 +1809,9 @@ This allows SLAM, costmap, and other nodes to use standard ROS2 frame names rega
 | `/cmd_vel` | hardware_bridge_node / Gazebo | Motor/wheel commands |
 | `/scan` | slam_toolbox, nav2_local_costmap, diagnostics_node | SLAM, obstacle detection, monitoring |
 | `/imu/data_raw` | diagnostics_node | Monitor IMU freshness |
-| `/odometry/filtered_odom` | slam_toolbox, nav2 controller, diagnostics_node | SLAM input, localized pose for control |
-| `/odometry/filtered_map` | nav2 planner, behavior_tree (goal comparison), diagnostics_node | Global navigation reference |
-| `/gps/rtk_fix` | gps_pose_converter_node, diagnostics_node | Convert fix to local frame, monitor GPS |
+| `/fusion/odom` | slam_toolbox, nav2 controller, diagnostics_node | SLAM input, localized pose for control |
+| `/map` | nav2 planner, behavior_tree (goal comparison), diagnostics_node | Global navigation reference |
+| `/gps/rtk_fix` | FusionCore, navsat_to_absolute_pose_node, diagnostics_node | Sensor fusion, convert fix to local frame, monitor GPS |
 | `/status` | behavior_tree_node, localization_monitor_node, diagnostics_node | Health checks, sensor freshness |
 | `/emergency` | behavior_tree_node, diagnostics_node | Emergency monitoring |
 | `/power` | behavior_tree_node, diagnostics_node | Battery level monitoring |
@@ -1827,7 +1827,6 @@ This allows SLAM, costmap, and other nodes to use standard ROS2 frame names rega
 | `/high_level_control` | HighLevelControl | behavior_tree_node | GUI | Mode commands (START=1, HOME=2, RECORD_AREA=3, S2=4, RECORD_FINISH=5, RECORD_CANCEL=6, MANUAL_MOW=7) |
 | `/map_server_node/add_area` | AddMowingArea | map_server_node | RecordArea BT node | Save recorded mowing area polygon |
 | `/navigate_to_pose` | nav2_msgs/NavigateToPose | nav2_behavior_tree_navigator | behavior_tree_node | Send goal to Nav2 |
-| `/robot_localization/set_pose` | robot_localization/SetPose | ekf_odom | startup/testing tools | Initialize odometry origin |
 
 **Actions (Async Request-Response):**
 
@@ -1858,10 +1857,11 @@ This allows SLAM, costmap, and other nodes to use standard ROS2 frame names rega
 
 4. **Robust Serial Protocol (COBS + CRC-16):** Enables reliable bidirectional communication between Raspberry Pi and STM32 firmware over noisy USB at 115200 baud.
 
-5. **Dual-Tier EKF Localization:**
-   - Local (ekf_odom, 50 Hz): Fast odometry + IMU fusion for real-time control
-   - Global (ekf_map, 20 Hz): Corrects drift using GPS or SLAM loop closures
-   - Graceful degradation: operates without GPS in GNSS-denied areas
+5. **Single-Tier UKF Localization (FusionCore):**
+   - Fuses wheel odometry + IMU + GPS in single UKF (50 Hz)
+   - Outputs `/fusion/odom` (odom→base_footprint) with GPS correction
+   - SLAM Toolbox provides map→odom TF authority via scan matching (20 Hz)
+   - Graceful degradation: operates without GPS in GNSS-denied areas (wheel+IMU only)
 
 6. **Coverage Path Following:** FTCController (Follow-the-Carrot) is the active controller for FollowCoveragePath, achieving <10mm lateral accuracy with 3-axis PID control and in-place rotation at swath turns. RPP remains active for FollowPath (transit and docking).
 
