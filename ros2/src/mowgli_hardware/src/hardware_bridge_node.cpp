@@ -54,7 +54,7 @@
 #include <vector>
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
-#include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
 #include "mowgli_hardware/ll_datatypes.hpp"
 #include "mowgli_hardware/packet_handler.hpp"
 #include "mowgli_hardware/serial_port.hpp"
@@ -128,16 +128,23 @@ private:
     pub_imu_ = create_publisher<sensor_msgs::msg::Imu>("~/imu/data_raw", 10);
     pub_wheel_odom_ = create_publisher<nav_msgs::msg::Odometry>("~/wheel_odom", 10);
     pub_battery_state_ = create_publisher<sensor_msgs::msg::BatteryState>("/battery_state", 10);
-    // dock_pose_fix publisher removed — ekf_map doesn't publish TF and nothing
-    // reads /odometry/filtered_map. Re-add if ekf_map becomes TF publisher.
+    // Dock heading for FusionCore: while charging, publish dock yaw on
+    // /gnss/heading at 1 Hz so FusionCore has a heading anchor.
+    // Stops automatically when robot undocks (GPS velocity takes over).
+    pub_dock_heading_ = create_publisher<sensor_msgs::msg::Imu>("/gnss/heading", 10);
+    timer_dock_heading_ = create_wall_timer(std::chrono::seconds(1),
+                                            [this]()
+                                            {
+                                              publish_dock_heading();
+                                            });
   }
 
   void create_subscribers()
   {
-    sub_cmd_vel_ = create_subscription<geometry_msgs::msg::Twist>(
+    sub_cmd_vel_ = create_subscription<geometry_msgs::msg::TwistStamped>(
         "~/cmd_vel",
         10,
-        [this](geometry_msgs::msg::Twist::ConstSharedPtr msg)
+        [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr msg)
         {
           on_cmd_vel(msg);
         });
@@ -363,12 +370,10 @@ private:
       pub_status_->publish(msg);
     }
 
-    // ---- Dock pose fix ----
-    // Previously published dock position+heading to ekf_map while charging.
-    // Removed: ekf_map has publish_tf=false and nothing reads its output.
-    // SLAM is the sole TF authority. dock_pose_yaw is only used for SLAM
+    // ---- Dock heading ----
+    // Dock heading is published at 1 Hz on /gnss/heading while charging
+    // (see publish_dock_heading()). dock_pose_yaw is also used for SLAM
     // map_start_pose (on saved maps) and by the BT for heading reference.
-    // If ekf_map is re-enabled as TF publisher in the future, re-add this.
 
     // ---- Emergency message ----
     {
@@ -537,9 +542,15 @@ private:
       }
     }
 
-    // Orientation not computed here; fill with identity and mark as unknown.
+    // Flat-ground constraint: the robot is always on a level surface, so
+    // roll=0 and pitch=0. Yaw is left to FusionCore (GPS+gyro).
+    // Set orientation to identity with tight roll/pitch covariance and
+    // loose yaw covariance so FusionCore constrains roll/pitch to zero
+    // without fighting its own yaw estimate.
     msg.orientation.w = 1.0;
-    msg.orientation_covariance[0] = -1.0;  // Signal: orientation unknown.
+    msg.orientation_covariance[0] = 0.001;  // roll  variance (tight)
+    msg.orientation_covariance[4] = 0.001;  // pitch variance (tight)
+    msg.orientation_covariance[8] = 99.0;  // yaw   variance (don't constrain)
 
     // Gyro covariance: WT901 gyro z-axis severely under-reports yaw rate
     // (~17% of actual). Set high covariance so the EKF trusts wheel odom
@@ -549,6 +560,27 @@ private:
     msg.angular_velocity_covariance[8] = 1.0;  // yaw rate — low confidence
 
     pub_imu_->publish(msg);
+  }
+
+  void publish_dock_heading()
+  {
+    if (!is_charging_)
+      return;
+
+    // Publish dock heading as sensor_msgs/Imu on /gnss/heading.
+    // FusionCore interprets the orientation quaternion as heading in ENU.
+    // dock_yaw_ is compass heading; convert to ENU: yaw_enu = pi/2 - compass
+    const double enu_yaw = M_PI / 2.0 - dock_yaw_;
+    auto msg = sensor_msgs::msg::Imu{};
+    msg.header.stamp = now();
+    msg.header.frame_id = "base_footprint";
+    msg.orientation.z = std::sin(enu_yaw / 2.0);
+    msg.orientation.w = std::cos(enu_yaw / 2.0);
+    // Tight yaw covariance — we know the dock heading from compass at install
+    msg.orientation_covariance[0] = 0.01;  // roll
+    msg.orientation_covariance[4] = 0.01;  // pitch
+    msg.orientation_covariance[8] = 0.01;  // yaw (~6° 1-sigma)
+    pub_dock_heading_->publish(msg);
   }
 
   void handle_ui_event(const uint8_t* data, std::size_t len)
@@ -735,11 +767,11 @@ private:
   // cmd_vel subscriber
   // ---------------------------------------------------------------------------
 
-  void on_cmd_vel(geometry_msgs::msg::Twist::ConstSharedPtr msg)
+  void on_cmd_vel(geometry_msgs::msg::TwistStamped::ConstSharedPtr msg)
   {
     // The firmware ignores cmd_vel when mode is IDLE.  When velocity commands
     // arrive (from Nav2 or teleop), ensure the firmware is in AUTONOMOUS mode.
-    if (current_mode_ == 0u && (msg->linear.x != 0.0 || msg->angular.z != 0.0))
+    if (current_mode_ == 0u && (msg->twist.linear.x != 0.0 || msg->twist.angular.z != 0.0))
     {
       current_mode_ = 1u;  // AUTONOMOUS
       send_high_level_state();
@@ -747,8 +779,8 @@ private:
 
     LlCmdVel pkt{};
     pkt.type = PACKET_ID_LL_CMD_VEL;
-    pkt.linear_x = static_cast<float>(msg->linear.x);
-    pkt.angular_z = static_cast<float>(msg->angular.z);
+    pkt.linear_x = static_cast<float>(msg->twist.linear.x);
+    pkt.angular_z = static_cast<float>(msg->twist.angular.z);
 
     send_raw_packet(reinterpret_cast<const uint8_t*>(&pkt), sizeof(LlCmdVel) - sizeof(uint16_t));
   }
@@ -803,8 +835,9 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_wheel_odom_;
   rclcpp::Publisher<sensor_msgs::msg::BatteryState>::SharedPtr pub_battery_state_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_dock_heading_;
 
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr sub_cmd_vel_;
   rclcpp::Subscription<mowgli_interfaces::msg::HighLevelStatus>::SharedPtr sub_hl_status_;
 
   rclcpp::Service<mowgli_interfaces::srv::MowerControl>::SharedPtr srv_mower_control_;
@@ -813,6 +846,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_read_;
   rclcpp::TimerBase::SharedPtr timer_heartbeat_;
   rclcpp::TimerBase::SharedPtr timer_high_level_;
+  rclcpp::TimerBase::SharedPtr timer_dock_heading_;
 
   // ---------------------------------------------------------------------------
   // Members: serial and protocol
