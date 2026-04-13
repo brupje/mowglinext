@@ -134,7 +134,8 @@ type RosProvider struct {
 	// Charging state from hardware_bridge/status (guarded by mtx)
 	isCharging bool
 
-	dbProvider types2.IDBProvider
+	dbProvider      types2.IDBProvider
+	sessionTracker  *SessionTracker
 }
 
 // NewRosProvider constructs a RosProvider, reads the foxglove URL from the
@@ -149,10 +150,11 @@ func NewRosProvider(dbProvider types2.IDBProvider) types2.IRosProvider {
 	}
 
 	r := &RosProvider{
-		client:      foxglove.NewClient(foxgloveURL),
-		subscribers: make(map[string]map[string]*RosSubscriber),
-		lastMessage: make(map[string][]byte),
-		dbProvider:  dbProvider,
+		client:         foxglove.NewClient(foxgloveURL),
+		subscribers:    make(map[string]map[string]*RosSubscriber),
+		lastMessage:    make(map[string][]byte),
+		dbProvider:     dbProvider,
+		sessionTracker: NewSessionTracker(dbProvider),
 	}
 
 	go func() {
@@ -282,6 +284,10 @@ func (r *RosProvider) fanOut(logicalKey string, msg []byte) {
 	r.lastMessage[logicalKey] = msg
 	for _, sub := range r.subscribers[logicalKey] {
 		sub.Publish(msg)
+	}
+	// Track mowing sessions from high-level status transitions
+	if logicalKey == "highLevelStatus" && r.sessionTracker != nil {
+		go r.sessionTracker.OnHighLevelStatus(msg)
 	}
 }
 
