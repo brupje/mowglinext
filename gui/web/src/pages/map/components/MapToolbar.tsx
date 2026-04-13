@@ -31,7 +31,7 @@ interface MowingAreaItem extends MenuItemType {
 }
 
 interface MapToolbarProps {
-    manualMode: number | undefined;
+    manualMode: boolean;
     useSatellite: boolean;
     mowingAreas: MowingAreaItem[];
     stateName?: string;

@@ -48,7 +48,7 @@ interface MowingAreaItem extends MenuItemType {
 interface MapToolbarMobileProps {
     editMap: boolean;
     hasUnsavedChanges: boolean;
-    manualMode: number | undefined;
+    manualMode: boolean;
     useSatellite: boolean;
     historyIndex: number;
     editHistoryLength: number;
