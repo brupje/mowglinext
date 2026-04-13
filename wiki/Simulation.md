@@ -384,9 +384,9 @@ docker compose -f docker-compose.simulation.yaml exec dev-sim bash -c "\
 
 | Topic | Type | Purpose |
 |-------|------|---------|
-| `/odometry/filtered_odom` | nav_msgs/Odometry | Fused wheel + IMU (EKF) |
-| `/odometry/filtered_map` | nav_msgs/Odometry | Fused odometry + GPS (EKF) |
-| `/tf` | tf2_msgs/TFMessage | Transform tree (map → odom → base_link) |
+| `/fusion/odom` | nav_msgs/Odometry | Fused wheel + IMU + GPS (FusionCore UKF) |
+| `/map` | nav_msgs/OccupancyGrid | Occupancy grid from SLAM |
+| `/tf` | tf2_msgs/TFMessage | Transform tree (map → odom → base_footprint) |
 
 ### High-Level Control Service
 
@@ -599,7 +599,7 @@ docker exec mowgli_simulation_gui bash -c "\
   source /opt/ros/jazzy/setup.bash && \
   source /ros2_ws/install/setup.bash && \
   ros2 bag record -o test_odom_0 \
-    /odometry/filtered_odom \
+    /fusion/odom \
     /wheel_odom \
     /tf \
     --duration 30"
