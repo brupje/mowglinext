@@ -159,8 +159,9 @@
               <SaveSlamMap map_path="/ros2_ws/maps/garden_map"/>
               <PublishHighLevelStatus state="2" state_name="UNDOCKING"/>
               <RecordUndockStart/>
-              <!-- Wait for costmap services, then clear dock from costmap -->
-              <WaitForDuration duration_sec="3.0"/>
+              <!-- Wait for Nav2 to fully activate on ARM (costmap + behavior_server).
+                   10s gives lifecycle_manager time to configure+activate all nodes. -->
+              <WaitForDuration duration_sec="10.0"/>
               <ClearCostmap/>
               <WaitForDuration duration_sec="1.0"/>
               <ClearCostmap/>
