@@ -121,28 +121,22 @@ BT::NodeStatus ClearCostmap::tick()
 
   auto request = std::make_shared<std_srvs::srv::Empty::Request>();
 
-  // Wait up to 2s for service discovery. On first call after Nav2 lifecycle
-  // activation, DDS needs time to discover the costmap services.
-  if (global_client_->wait_for_service(std::chrono::seconds(2)))
-  {
-    global_client_->async_send_request(request);
-    RCLCPP_INFO(ctx->node->get_logger(), "ClearCostmap: sent clear request to global costmap");
-  }
-  else
+  // Wait up to 2s for service discovery. Return FAILURE if services
+  // aren't ready so the BT can retry (RetryUntilSuccessful).
+  bool global_ok = global_client_->wait_for_service(std::chrono::seconds(2));
+  bool local_ok = local_client_->wait_for_service(std::chrono::seconds(2));
+
+  if (!global_ok || !local_ok)
   {
     RCLCPP_WARN(ctx->node->get_logger(),
-                "ClearCostmap: global costmap service not ready, skipping");
+                "ClearCostmap: costmap services not ready (global=%s, local=%s)",
+                global_ok ? "ok" : "waiting", local_ok ? "ok" : "waiting");
+    return BT::NodeStatus::FAILURE;
   }
 
-  if (local_client_->wait_for_service(std::chrono::seconds(2)))
-  {
-    local_client_->async_send_request(request);
-    RCLCPP_INFO(ctx->node->get_logger(), "ClearCostmap: sent clear request to local costmap");
-  }
-  else
-  {
-    RCLCPP_WARN(ctx->node->get_logger(), "ClearCostmap: local costmap service not ready, skipping");
-  }
+  global_client_->async_send_request(request);
+  local_client_->async_send_request(request);
+  RCLCPP_INFO(ctx->node->get_logger(), "ClearCostmap: cleared both costmaps");
 
   return BT::NodeStatus::SUCCESS;
 }
