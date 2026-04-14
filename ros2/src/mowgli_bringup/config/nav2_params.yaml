@@ -330,26 +330,11 @@ local_costmap:
       # planner (swaths stay within the polygon) and the collision_monitor
       # (real LiDAR obstacles only). Speed filter also removed as it depends
       # on the same mask infrastructure.
-      plugins: ["obstacle_layer", "inflation_layer"]
-
-      obstacle_layer:
-        plugin: "nav2_costmap_2d::ObstacleLayer"
-        enabled: true
-        # Short persistence: heading drift causes wall duplicates if old
-        # scans persist. 0s = only current scan used, clears immediately.
-        observation_persistence: 0.0
-        observation_sources: scan
-        scan:
-          topic: /scan
-          max_obstacle_height: 2.0
-          clearing: true
-          marking: true
-          data_type: "LaserScan"
-          raytrace_max_range: 8.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 5.0
-          obstacle_min_range: 0.50
-          inf_is_valid: true
+      # Local costmap: NO obstacle layer. Collision_monitor handles real-time
+      # obstacle avoidance (slow/stop polygons). The obstacle layer caused
+      # BackUp "Collision Ahead" failures at the dock — the dock structure
+      # is always visible to lidar and can't be cleared from the costmap.
+      plugins: ["inflation_layer"]
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
