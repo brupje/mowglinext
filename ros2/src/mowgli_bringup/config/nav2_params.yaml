@@ -419,7 +419,10 @@ collision_monitor:
     # Two-layer protection:
     # 1. Slow zone (chassis +15cm): reduces speed, gives Nav2 time to replan
     # 2. Hard stop (exact chassis): last-resort emergency stop
-    polygons: ["PolygonSlow", "PolygonStop"]
+    # PolygonStop removed — conflicts with Nav2 path following.
+    # Costmap planner handles obstacle avoidance. PolygonSlow gives
+    # the planner time to reroute without hard-stopping the robot.
+    polygons: ["PolygonSlow"]
     PolygonSlow:
       type: "polygon"
       # Chassis + 15cm — slow to 30% when obstacle is close
