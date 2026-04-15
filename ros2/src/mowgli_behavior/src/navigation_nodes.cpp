@@ -276,7 +276,8 @@ BT::NodeStatus BackUp::onStart()
   goal_msg.target.x = -dist;
   goal_msg.target.y = 0.0;
   goal_msg.speed = speed;
-  goal_msg.time_allowance = rclcpp::Duration::from_seconds(dist / speed + 5.0);
+  // Generous timeout: slow motors need extra time. 3x nominal duration.
+  goal_msg.time_allowance = rclcpp::Duration::from_seconds(dist / speed * 3.0);
 
   RCLCPP_INFO(ctx->node->get_logger(), "BackUp: reversing %.2fm at %.2f m/s", dist, speed);
 
