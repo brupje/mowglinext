@@ -15,7 +15,7 @@
 #   /wheel_odom  (nav_msgs/Odometry)    — wheel encoder velocity
 #   /imu/data    (sensor_msgs/Imu)      — gyro + accel
 #   /gps/fix     (sensor_msgs/NavSatFix) — GPS position
-#   /gnss/heading (sensor_msgs/Imu)     — dock heading while charging
+#   /gnss/heading (sensor_msgs/Imu)     — dock heading (from hardware_bridge ~/dock_heading)
 #
 # OUTPUT:
 #   /fusion/odom (nav_msgs/Odometry)    — fused state estimate

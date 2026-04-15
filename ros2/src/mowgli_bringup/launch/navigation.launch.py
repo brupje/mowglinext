@@ -173,8 +173,22 @@ def generate_launch_description() -> LaunchDescription:
         gps_y = float(rt_rp.get("gps_y", 0.0))
         gps_z = float(rt_rp.get("gps_z", 0.0))
 
-    # Rewrite use_sim_time and footprint throughout nav2_params.yaml.
-    param_rewrites = {"use_sim_time": use_sim_time}
+    # Compute BT XML paths from installed package shares (not hardcoded).
+    bt_nav_to_pose_xml = os.path.join(
+        get_package_share_directory("mowgli_behavior"),
+        "trees", "navigate_to_pose.xml",
+    )
+    bt_nav_through_poses_xml = os.path.join(
+        get_package_share_directory("nav2_bt_navigator"),
+        "behavior_trees", "navigate_through_poses_w_replanning_and_recovery.xml",
+    )
+
+    # Rewrite use_sim_time, footprint, and BT XML paths throughout nav2_params.yaml.
+    param_rewrites = {
+        "use_sim_time": use_sim_time,
+        "default_nav_to_pose_bt_xml": bt_nav_to_pose_xml,
+        "default_nav_through_poses_bt_xml": bt_nav_through_poses_xml,
+    }
     if footprint_str:
         param_rewrites["footprint"] = footprint_str
 
@@ -297,6 +311,9 @@ def generate_launch_description() -> LaunchDescription:
                 f"map_start_pose: [{dock_start_pose[0]}, "
                 f"{dock_start_pose[1]}, {dock_start_pose[2]}]"
             )
+            # delete=False is required: the file must persist on disk so that
+            # RewrittenYaml / the SLAM node can read it after this function
+            # returns.  The OS will clean it up on reboot (or container restart).
             dock_slam_file = tempfile.NamedTemporaryFile(
                 mode='w', suffix='.yaml', prefix='slam_dock_',
                 delete=False

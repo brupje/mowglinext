@@ -13,8 +13,9 @@ bt_navigator:
     default_server_timeout: 60
     # Custom Nav2 BT that adds GoalCheckerSelector (required when multiple
     # goal_checker_plugins are configured in controller_server).
-    default_nav_to_pose_bt_xml: /ros2_ws/install/mowgli_behavior/share/mowgli_behavior/trees/navigate_to_pose.xml
-    default_nav_through_poses_bt_xml: /opt/ros/kilted/share/nav2_bt_navigator/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml
+    # Paths are injected by navigation.launch.py via RewrittenYaml — keep empty here.
+    default_nav_to_pose_bt_xml: ""
+    default_nav_through_poses_bt_xml: ""
     # plugin_lib_names: auto-loaded in Jazzy — no manual list needed.
     enable_stamped_cmd_vel: true
 
@@ -433,15 +434,9 @@ collision_monitor:
       visualize: true
       polygon_pub_topic: "polygon_slow"
       enabled: true
-    PolygonStop:
-      type: "polygon"
-      # Exact chassis — hard stop only on imminent contact
-      points: "[[0.50, 0.20], [0.50, -0.20], [-0.10, -0.20], [-0.10, 0.20]]"
-      action_type: "stop"
-      min_points: 6
-      visualize: true
-      polygon_pub_topic: "polygon_stop"
-      enabled: true
+    # PolygonStop config removed — was defined but not listed in polygons[].
+    # See commit cc2a4c4 for why PolygonStop was disabled (conflicts with
+    # Nav2 path following). Only PolygonSlow is active.
     observation_sources: ["scan"]
     scan:
       type: "scan"

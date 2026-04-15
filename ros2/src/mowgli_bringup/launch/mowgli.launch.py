@@ -203,6 +203,7 @@ def generate_launch_description() -> LaunchDescription:
             ("~/power", "/hardware_bridge/power"),
             ("~/status", "/hardware_bridge/status"),
             ("~/cmd_vel", "/cmd_vel"),
+            ("~/dock_heading", "/gnss/heading"),
         ],
     )
 

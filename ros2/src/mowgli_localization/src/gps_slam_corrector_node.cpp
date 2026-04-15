@@ -1,3 +1,17 @@
+// Copyright 2026 Mowgli Project
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
 // ---------------------------------------------------------------------------
 // GPS-SLAM Corrector Node
 //
@@ -21,16 +35,17 @@
 
 #include <cmath>
 #include <memory>
+#include <mutex>
 
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <tf2/utils.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
 
 namespace mowgli_localization
 {
@@ -38,8 +53,7 @@ namespace mowgli_localization
 class GpsSlamCorrectorNode : public rclcpp::Node
 {
 public:
-  GpsSlamCorrectorNode()
-  : Node("gps_slam_corrector")
+  GpsSlamCorrectorNode() : Node("gps_slam_corrector")
   {
     declare_parameter<double>("alpha", 0.02);
     declare_parameter<double>("max_correction_rate", 0.05);
@@ -72,7 +86,8 @@ public:
       datum_set_ = true;
       RCLCPP_INFO(get_logger(),
                   "GPS datum from config (dock): lat=%.7f lon=%.7f",
-                  datum_lat_, datum_lon_);
+                  datum_lat_,
+                  datum_lon_);
     }
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
@@ -87,27 +102,28 @@ public:
           on_gps_fix(msg);
         });
 
-    publish_timer_ = create_wall_timer(
-        std::chrono::duration<double>(1.0 / publish_rate_),
-        [this]()
-        {
-          publish_correction();
-          // SLAM heading injection disabled: creates feedback loop.
-          // SLAM already corrects heading via slam_map→odom TF.
-          // Nav2 uses map→base_footprint which includes SLAM correction.
-          // publish_slam_heading();
-        });
+    publish_timer_ = create_wall_timer(std::chrono::duration<double>(1.0 / publish_rate_),
+                                       [this]()
+                                       {
+                                         publish_correction();
+                                         // SLAM heading injection disabled: creates feedback loop.
+                                         // SLAM already corrects heading via slam_map→odom TF.
+                                         // Nav2 uses map→base_footprint which includes SLAM
+                                         // correction. publish_slam_heading();
+                                       });
 
-    // Publish SLAM heading on /gnss/heading so FusionCore tracks it.
-    // Same topic as dock heading (hardware_bridge publishes while charging).
-    // When not charging, SLAM heading keeps FusionCore aligned.
-    heading_pub_ = create_publisher<sensor_msgs::msg::Imu>(
-        "/gnss/heading", rclcpp::QoS(10));
+    // SLAM heading publisher (currently disabled — see publish_slam_heading()).
+    // hardware_bridge publishes dock heading on ~/dock_heading → /gnss/heading
+    // while charging. This publisher is reserved for future SLAM heading
+    // injection if needed — uses a distinct topic to avoid dual-publisher race.
+    heading_pub_ = create_publisher<sensor_msgs::msg::Imu>("~/slam_heading", rclcpp::QoS(10));
 
     RCLCPP_INFO(get_logger(),
                 "GPS-SLAM corrector: %s→%s, alpha=%.3f, max_rate=%.3f m/s, "
-                "SLAM heading → /gnss/heading",
-                map_frame_.c_str(), slam_frame_.c_str(), alpha_,
+                "SLAM heading → ~/slam_heading (disabled)",
+                map_frame_.c_str(),
+                slam_frame_.c_str(),
+                alpha_,
                 max_correction_rate_);
   }
 
@@ -128,8 +144,7 @@ private:
       datum_lon_ = msg->longitude;
       cos_datum_lat_ = std::cos(datum_lat_ * M_PI / 180.0);
       datum_set_ = true;
-      RCLCPP_INFO(get_logger(),
-                  "GPS datum set: lat=%.7f lon=%.7f", datum_lat_, datum_lon_);
+      RCLCPP_INFO(get_logger(), "GPS datum set: lat=%.7f lon=%.7f", datum_lat_, datum_lon_);
       return;
     }
 
@@ -145,17 +160,22 @@ private:
     double weight;
     switch (msg->status.status)
     {
-      case 2:  weight = 1.0;  break;  // RTK
-      case 1:  weight = 0.1;  break;  // DGPS
-      default: weight = 0.01; break;  // Basic GPS
+      case 2:
+        weight = 1.0;
+        break;  // RTK
+      case 1:
+        weight = 0.1;
+        break;  // DGPS
+      default:
+        weight = 0.01;
+        break;  // Basic GPS
     }
 
     // Look up where SLAM thinks the robot is in slam_map frame
     geometry_msgs::msg::TransformStamped slam_to_base;
     try
     {
-      slam_to_base = tf_buffer_->lookupTransform(
-          slam_frame_, base_frame_, tf2::TimePointZero);
+      slam_to_base = tf_buffer_->lookupTransform(slam_frame_, base_frame_, tf2::TimePointZero);
     }
     catch (const tf2::TransformException& ex)
     {
@@ -174,8 +194,11 @@ private:
     double target_y = gps_north - slam_y;
 
     // Re-read tuning params (allows runtime adjustment via ros2 param set)
-    alpha_ = get_parameter("alpha").as_double();
-    max_correction_rate_ = get_parameter("max_correction_rate").as_double();
+    {
+      std::lock_guard<std::mutex> lock(params_mutex_);
+      alpha_ = get_parameter("alpha").as_double();
+      max_correction_rate_ = get_parameter("max_correction_rate").as_double();
+    }
 
     // Low-pass filter with GPS quality weighting
     double effective_alpha = alpha_ * weight;
@@ -187,8 +210,14 @@ private:
 
     RCLCPP_DEBUG(get_logger(),
                  "GPS=(%.2f,%.2f) SLAM=(%.2f,%.2f) corr=(%.2f,%.2f) status=%d w=%.3f",
-                 gps_east, gps_north, slam_x, slam_y,
-                 correction_x_, correction_y_, msg->status.status, weight);
+                 gps_east,
+                 gps_north,
+                 slam_x,
+                 slam_y,
+                 correction_x_,
+                 correction_y_,
+                 msg->status.status,
+                 weight);
   }
 
   // ─── Publish map→slam_map TF ──────────────────────────────────────────────
@@ -207,7 +236,11 @@ private:
       double dx = correction_x_ - published_x_;
       double dy = correction_y_ - published_y_;
       double dist = std::sqrt(dx * dx + dy * dy);
-      double max_step = max_correction_rate_ * dt;
+      double max_step;
+      {
+        std::lock_guard<std::mutex> lock(params_mutex_);
+        max_step = max_correction_rate_ * dt;
+      }
 
       if (dist > max_step && dist > 1e-6)
       {
@@ -236,19 +269,18 @@ private:
   }
 
   // ─── Publish SLAM heading to FusionCore ────────────────────────────────────
+  // DISABLED — creates feedback loop. Kept for reference.
   // Reads map→base_footprint TF (SLAM + FusionCore combined), extracts yaw,
-  // publishes on /gnss/heading so FusionCore tracks SLAM's heading.
-  // This closes the loop: SLAM corrects FusionCore's heading drift.
-  // Not a destabilizing feedback loop — SLAM is the authority via scan matching,
-  // and FusionCore converges toward it.
+  // publishes on ~/slam_heading. If re-enabled, would need remapping to
+  // /gnss/heading in the launch file (currently used by hardware_bridge
+  // dock heading only).
 
   void publish_slam_heading()
   {
     geometry_msgs::msg::TransformStamped tf;
     try
     {
-      tf = tf_buffer_->lookupTransform(
-          map_frame_, base_frame_, tf2::TimePointZero);
+      tf = tf_buffer_->lookupTransform(map_frame_, base_frame_, tf2::TimePointZero);
     }
     catch (const tf2::TransformException&)
     {
@@ -265,22 +297,23 @@ private:
     // Loose yaw covariance so FusionCore's Mahalanobis gate accepts large
     // corrections. With 1.0 rad² and threshold 100, accepts up to ~10 rad
     // (any angle). The heading value is correct — we just need the gate open.
-    msg.orientation_covariance[0] = 0.01;   // roll
-    msg.orientation_covariance[4] = 0.01;   // pitch
-    msg.orientation_covariance[8] = 1.0;    // yaw — loose to pass outlier gate
+    msg.orientation_covariance[0] = 0.01;  // roll
+    msg.orientation_covariance[4] = 0.01;  // pitch
+    msg.orientation_covariance[8] = 1.0;  // yaw — loose to pass outlier gate
 
     heading_pub_->publish(msg);
   }
 
   // ─── Parameters ────────────────────────────────────────────────────────────
 
-  double alpha_;                   // Low-pass filter coefficient (0-1)
-  double max_correction_rate_;     // Max m/s the correction can move
+  std::mutex params_mutex_;  // Guards alpha_ and max_correction_rate_
+  double alpha_;  // Low-pass filter coefficient (0-1)
+  double max_correction_rate_;  // Max m/s the correction can move
   std::string map_frame_;
   std::string slam_frame_;
   std::string base_frame_;
   double publish_rate_;
-  double gps_noise_threshold_;     // Sigma below which GPS gets full weight
+  double gps_noise_threshold_;  // Sigma below which GPS gets full weight
 
   // ─── Datum ─────────────────────────────────────────────────────────────────
 
@@ -292,9 +325,9 @@ private:
   // ─── State ─────────────────────────────────────────────────────────────────
 
   bool has_correction_ = false;
-  double correction_x_ = 0.0;     // Filtered correction
+  double correction_x_ = 0.0;  // Filtered correction
   double correction_y_ = 0.0;
-  double published_x_ = 0.0;      // Rate-limited published value
+  double published_x_ = 0.0;  // Rate-limited published value
   double published_y_ = 0.0;
   rclcpp::Time last_gps_time_{0, 0, RCL_ROS_TIME};
 

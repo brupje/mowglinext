@@ -23,12 +23,13 @@
  * CRC-16-protected packet protocol defined in ll_datatypes.hpp.
  *
  * Published topics (relative to node namespace):
- *   ~/status       mowgli_interfaces/msg/Status
- *   ~/emergency    mowgli_interfaces/msg/Emergency
- *   ~/power        mowgli_interfaces/msg/Power
- *   ~/imu/data_raw sensor_msgs/msg/Imu
- *   ~/wheel_odom   nav_msgs/msg/Odometry
- *   /battery_state sensor_msgs/msg/BatteryState  (for opennav_docking)
+ *   ~/status        mowgli_interfaces/msg/Status
+ *   ~/emergency     mowgli_interfaces/msg/Emergency
+ *   ~/power         mowgli_interfaces/msg/Power
+ *   ~/imu/data_raw  sensor_msgs/msg/Imu
+ *   ~/wheel_odom    nav_msgs/msg/Odometry
+ *   ~/dock_heading  sensor_msgs/msg/Imu  (dock yaw while charging, remapped → /gnss/heading)
+ *   /battery_state  sensor_msgs/msg/BatteryState  (for opennav_docking)
  *
  * Subscribed topics:
  *   ~/cmd_vel      geometry_msgs/msg/Twist  → LlCmdVel packet to STM32
@@ -123,16 +124,19 @@ private:
 
   void create_publishers()
   {
-    pub_status_ = create_publisher<mowgli_interfaces::msg::Status>("~/status", 10);
-    pub_emergency_ = create_publisher<mowgli_interfaces::msg::Emergency>("~/emergency", 10);
-    pub_power_ = create_publisher<mowgli_interfaces::msg::Power>("~/power", 10);
-    pub_imu_ = create_publisher<sensor_msgs::msg::Imu>("~/imu/data_raw", 10);
-    pub_wheel_odom_ = create_publisher<nav_msgs::msg::Odometry>("~/wheel_odom", 10);
-    pub_battery_state_ = create_publisher<sensor_msgs::msg::BatteryState>("/battery_state", 10);
-    // Dock heading for FusionCore: while charging, publish dock yaw on
-    // /gnss/heading at 1 Hz so FusionCore has a heading anchor.
-    // Stops automatically when robot undocks (GPS velocity takes over).
-    pub_dock_heading_ = create_publisher<sensor_msgs::msg::Imu>("/gnss/heading", 10);
+    pub_status_ = create_publisher<mowgli_interfaces::msg::Status>("~/status", rclcpp::QoS(10));
+    pub_emergency_ =
+        create_publisher<mowgli_interfaces::msg::Emergency>("~/emergency", rclcpp::QoS(10));
+    pub_power_ = create_publisher<mowgli_interfaces::msg::Power>("~/power", rclcpp::QoS(10));
+    pub_imu_ = create_publisher<sensor_msgs::msg::Imu>("~/imu/data_raw", rclcpp::SensorDataQoS());
+    pub_wheel_odom_ =
+        create_publisher<nav_msgs::msg::Odometry>("~/wheel_odom", rclcpp::SensorDataQoS());
+    pub_battery_state_ =
+        create_publisher<sensor_msgs::msg::BatteryState>("/battery_state", rclcpp::QoS(10));
+    // Dock heading for FusionCore: while charging, publish dock yaw at
+    // 1 Hz so FusionCore has a heading anchor. Remapped to /gnss/heading
+    // in mowgli.launch.py. Stops automatically when robot undocks.
+    pub_dock_heading_ = create_publisher<sensor_msgs::msg::Imu>("~/dock_heading", rclcpp::QoS(10));
     timer_dock_heading_ = create_wall_timer(std::chrono::seconds(1),
                                             [this]()
                                             {
@@ -144,7 +148,7 @@ private:
   {
     sub_cmd_vel_ = create_subscription<geometry_msgs::msg::TwistStamped>(
         "~/cmd_vel",
-        10,
+        rclcpp::SystemDefaultsQoS(),
         [this](geometry_msgs::msg::TwistStamped::ConstSharedPtr msg)
         {
           on_cmd_vel(msg);
@@ -154,7 +158,7 @@ private:
     // knows when to accept cmd_vel (mode != IDLE).
     sub_hl_status_ = create_subscription<mowgli_interfaces::msg::HighLevelStatus>(
         "/behavior_tree_node/high_level_status",
-        10,
+        rclcpp::QoS(10),
         [this](mowgli_interfaces::msg::HighLevelStatus::ConstSharedPtr msg)
         {
           current_mode_ = msg->state;
@@ -410,7 +414,7 @@ private:
     }
 
     // ---- Dock heading ----
-    // Dock heading is published at 1 Hz on /gnss/heading while charging
+    // Dock heading is published at 1 Hz on ~/dock_heading while charging
     // (see publish_dock_heading()). dock_pose_yaw is also used for SLAM
     // map_start_pose (on saved maps) and by the BT for heading reference.
 
@@ -717,8 +721,9 @@ private:
     if (!is_charging_)
       return;
 
-    // Publish dock heading as sensor_msgs/Imu on /gnss/heading.
-    // FusionCore interprets the orientation quaternion as heading in ENU.
+    // Publish dock heading as sensor_msgs/Imu on ~/dock_heading
+    // (remapped to /gnss/heading in launch). FusionCore interprets the
+    // orientation quaternion as heading in ENU.
     // dock_yaw_ is compass heading; convert to ENU: yaw_enu = pi/2 - compass
     const double enu_yaw = M_PI / 2.0 - dock_yaw_;
     auto msg = sensor_msgs::msg::Imu{};

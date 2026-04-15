@@ -49,7 +49,7 @@ BT::NodeStatus GetNextStrip::onStart()
 
   try
   {
-    auto tf = ctx->tf_buffer->lookupTransform("map", "base_link", tf2::TimePointZero);
+    auto tf = ctx->tf_buffer->lookupTransform("map", "base_footprint", tf2::TimePointZero);
     request->robot_x = tf.transform.translation.x;
     request->robot_y = tf.transform.translation.y;
   }
@@ -60,13 +60,29 @@ BT::NodeStatus GetNextStrip::onStart()
   }
   request->prefer_headland = false;
 
-  // Synchronous service call
+  // Synchronous service call — poll future without spinning (avoids executor deadlock)
   auto future = client_->async_send_request(request);
-  if (rclcpp::spin_until_future_complete(helper, future, std::chrono::seconds(5)) !=
-      rclcpp::FutureReturnCode::SUCCESS)
   {
-    RCLCPP_ERROR(ctx->node->get_logger(), "GetNextStrip: service call timed out");
-    return BT::NodeStatus::FAILURE;
+    auto timeout = std::chrono::seconds(5);
+    auto start = std::chrono::steady_clock::now();
+    bool completed = false;
+    while (rclcpp::ok())
+    {
+      if (future.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+      {
+        completed = true;
+        break;
+      }
+      if (std::chrono::steady_clock::now() - start > timeout)
+      {
+        break;
+      }
+    }
+    if (!completed)
+    {
+      RCLCPP_ERROR(ctx->node->get_logger(), "GetNextStrip: service call timed out");
+      return BT::NodeStatus::FAILURE;
+    }
   }
 
   auto response = future.get();
@@ -138,18 +154,12 @@ BT::NodeStatus FollowStrip::onStart()
   }
 
   setBladeEnabled(true);
-
-  Nav2FollowPath::Goal goal;
-  goal.path = ctx->current_strip_path;
-  goal.controller_id = "FollowCoveragePath";
-  goal.goal_checker_id = "coverage_goal_checker";
-
-  follow_handle_.reset();
-  follow_future_ = follow_client_->async_send_goal(goal);
+  blade_start_time_ = std::chrono::steady_clock::now();
+  goal_sent_ = false;
 
   RCLCPP_INFO(ctx->node->get_logger(),
-              "FollowStrip: sent %zu poses to FTCController",
-              goal.path.poses.size());
+              "FollowStrip: blade enabled, waiting %.1fs for spinup",
+              kBladeSpinupDelaySec);
 
   return BT::NodeStatus::RUNNING;
 }
@@ -157,6 +167,30 @@ BT::NodeStatus FollowStrip::onStart()
 BT::NodeStatus FollowStrip::onRunning()
 {
   auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+
+  // Wait for blade to spin up before sending the path goal
+  if (!goal_sent_)
+  {
+    auto elapsed = std::chrono::steady_clock::now() - blade_start_time_;
+    if (elapsed < std::chrono::duration<double>(kBladeSpinupDelaySec))
+      return BT::NodeStatus::RUNNING;
+
+    // Spinup complete — send path goal
+    Nav2FollowPath::Goal goal;
+    goal.path = ctx->current_strip_path;
+    goal.controller_id = "FollowCoveragePath";
+    goal.goal_checker_id = "coverage_goal_checker";
+
+    follow_handle_.reset();
+    follow_future_ = follow_client_->async_send_goal(goal);
+    goal_sent_ = true;
+
+    RCLCPP_INFO(ctx->node->get_logger(),
+                "FollowStrip: sent %zu poses to FTCController",
+                goal.path.poses.size());
+
+    return BT::NodeStatus::RUNNING;
+  }
 
   if (!follow_handle_)
   {
@@ -333,11 +367,28 @@ BT::NodeStatus GetNextUnmowedArea::tick()
     request->area_index = i;
 
     auto future = client_->async_send_request(request);
-    if (rclcpp::spin_until_future_complete(helper, future, std::chrono::seconds(2)) !=
-        rclcpp::FutureReturnCode::SUCCESS)
+    // Poll future without spinning (avoids executor deadlock)
     {
-      // Service call failed — no more areas exist at this index
-      break;
+      auto timeout = std::chrono::seconds(2);
+      auto start = std::chrono::steady_clock::now();
+      bool completed = false;
+      while (rclcpp::ok())
+      {
+        if (future.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready)
+        {
+          completed = true;
+          break;
+        }
+        if (std::chrono::steady_clock::now() - start > timeout)
+        {
+          break;
+        }
+      }
+      if (!completed)
+      {
+        // Service call failed — no more areas exist at this index
+        break;
+      }
     }
 
     auto response = future.get();

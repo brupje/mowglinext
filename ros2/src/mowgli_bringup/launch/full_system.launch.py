@@ -354,6 +354,7 @@ def generate_launch_description() -> LaunchDescription:
             mqtt_bridge_node,
             foxglove_bridge_node,
             # Dock heading is published by hardware_bridge at 1 Hz while
-            # charging (/gnss/heading). No separate launch action needed.
+            # charging (~/dock_heading → /gnss/heading via mowgli.launch.py
+            # remapping). No separate launch action needed.
         ]
     )
