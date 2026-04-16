@@ -66,6 +66,11 @@ public:
     // If both are 0.0, falls back to first GPS fix as datum.
     declare_parameter<double>("datum_lat", 0.0);
     declare_parameter<double>("datum_lon", 0.0);
+    // GPS antenna offset from base_footprint (from mowgli_robot.yaml gps_x/y).
+    // Used to compensate the heading-dependent error when comparing
+    // antenna position (GPS) with base_footprint position (SLAM).
+    declare_parameter<double>("gps_x", 0.0);
+    declare_parameter<double>("gps_y", 0.0);
 
     alpha_ = get_parameter("alpha").as_double();
     max_correction_rate_ = get_parameter("max_correction_rate").as_double();
@@ -74,6 +79,8 @@ public:
     base_frame_ = get_parameter("base_frame").as_string();
     publish_rate_ = get_parameter("publish_rate").as_double();
     gps_noise_threshold_ = get_parameter("gps_noise_threshold").as_double();
+    gps_lever_x_ = get_parameter("gps_x").as_double();
+    gps_lever_y_ = get_parameter("gps_y").as_double();
 
     // Use dock position as datum if configured
     double cfg_lat = get_parameter("datum_lat").as_double();
@@ -148,9 +155,38 @@ private:
       return;
     }
 
-    // Convert to ENU
+    // Convert to ENU (antenna position)
     double gps_east = (msg->longitude - datum_lon_) * cos_datum_lat_ * METERS_PER_DEG;
     double gps_north = (msg->latitude - datum_lat_) * METERS_PER_DEG;
+
+    // Compensate for antenna lever arm: GPS reports antenna position, but
+    // we need base_footprint position. Rotate the lever arm by the robot's
+    // current heading and subtract from the GPS ENU position.
+    if (gps_lever_x_ != 0.0 || gps_lever_y_ != 0.0)
+    {
+      geometry_msgs::msg::TransformStamped odom_to_base;
+      try
+      {
+        odom_to_base =
+            tf_buffer_->lookupTransform("odom", base_frame_, tf2::TimePointZero);
+        double yaw = tf2::getYaw(odom_to_base.transform.rotation);
+        // Also need slam_map→odom to get heading in map frame
+        geometry_msgs::msg::TransformStamped slam_to_odom;
+        slam_to_odom =
+            tf_buffer_->lookupTransform(slam_frame_, "odom", tf2::TimePointZero);
+        double slam_yaw = tf2::getYaw(slam_to_odom.transform.rotation);
+        double total_yaw = yaw + slam_yaw;
+        // Add current correction to get approximate heading in map frame
+        double cos_h = std::cos(total_yaw);
+        double sin_h = std::sin(total_yaw);
+        gps_east -= gps_lever_x_ * cos_h - gps_lever_y_ * sin_h;
+        gps_north -= gps_lever_x_ * sin_h + gps_lever_y_ * cos_h;
+      }
+      catch (const tf2::TransformException&)
+      {
+        // TF not yet available — skip lever arm compensation this cycle
+      }
+    }
 
     // Weight by NavSatFix status:
     //   -1 = no fix       → 0 (already rejected above)
@@ -314,6 +350,8 @@ private:
   std::string base_frame_;
   double publish_rate_;
   double gps_noise_threshold_;  // Sigma below which GPS gets full weight
+  double gps_lever_x_ = 0.0;  // Antenna offset from base_footprint (m)
+  double gps_lever_y_ = 0.0;
 
   // ─── Datum ─────────────────────────────────────────────────────────────────
 

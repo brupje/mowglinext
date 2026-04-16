@@ -22,6 +22,10 @@ ublox_gps_node:
       in: 32    # RTCM3 (RTK corrections input)
       out: 32   # UBX
 
+    usb:
+      in: 35    # UBX + NMEA + RTCM3
+      out: 3    # UBX + NMEA
+
     dgnss_mode: 3   # RTK Fixed
 
     inf:

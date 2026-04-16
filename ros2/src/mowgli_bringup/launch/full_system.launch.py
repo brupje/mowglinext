@@ -200,6 +200,7 @@ def generate_launch_description() -> LaunchDescription:
     # ------------------------------------------------------------------
     # 5. Wheel odometry
     # ------------------------------------------------------------------
+    wheel_track = float(robot_params.get("wheel_track", 0.325))
     wheel_odometry_node = Node(
         package="mowgli_localization",
         executable="wheel_odometry_node",
@@ -207,6 +208,7 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
         parameters=[
             localization_params,
+            {"wheel_distance": wheel_track},
             {"use_sim_time": use_sim_time},
         ],
     )

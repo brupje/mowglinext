@@ -471,6 +471,8 @@ def generate_launch_description() -> LaunchDescription:
             {"gps_noise_threshold": 2.0},
             {"datum_lat": datum_lat},
             {"datum_lon": datum_lon},
+            {"gps_x": gps_x},
+            {"gps_y": gps_y},
             {"use_sim_time": use_sim_time},
         ],
     )
