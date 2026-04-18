@@ -864,7 +864,12 @@ private:
     msg.twist.covariance[14] = 1e6;  // vz - unknown
     msg.twist.covariance[21] = 1e6;  // wx - unknown
     msg.twist.covariance[28] = 1e6;  // wy - unknown
-    msg.twist.covariance[35] = force_zero ? 1e-6 : 0.05;  // wz variance
+    // wz variance tightened 0.05 -> 9e-4 (σ 0.224 -> 0.03 rad/s, 1.7°/s).
+    // Wheels are calibrated to 0.2% linear error; diff-drive yaw rate σ is
+    // dominated by grass slip (~3%) not encoder resolution. Tighter wheel
+    // cov means FusionCore trusts wheel ωz more than WT901 gyro (under-
+    // reports yaw rate by 17%). Floor at 1e-6 when docked+idle (known zero).
+    msg.twist.covariance[35] = force_zero ? 1e-6 : 9e-4;  // wz variance
 
     pub_wheel_odom_->publish(msg);
   }

@@ -68,7 +68,10 @@ fusioncore_node:
     # IMU: differential gyro + accel only — no magnetometer.
     # hardware_bridge publishes identity orientation (no real heading).
     # has_magnetometer must be false so FusionCore only uses gyro rates.
-    imu.gyro_noise: 0.02
+    # gyro_noise raised 0.02 -> 0.05: WT901 gyro z-axis under-reports yaw
+    # rate by ~17% (hardware_bridge line 702) and has ~0.01 rad/s bias drift.
+    # Wheels are calibrated to 0.2% linear error — trust them more than gyro.
+    imu.gyro_noise: 0.05
     imu.accel_noise: 0.1
     imu.has_magnetometer: false
     # Subtract earth's gravity (~9.81 m/s²) from IMU z-axis accel.
@@ -77,9 +80,14 @@ fusioncore_node:
     # prevents z-drift from the 1g bias being treated as real acceleration.
     imu.remove_gravitational_acceleration: true
 
-    # Wheel encoders: noisy on soft/wet ground
+    # Wheel encoders: calibrated to 0.2% linear error (session notes 2026-04-18).
+    # Fallback only — hardware_bridge publishes non-zero per-axis variance in
+    # /wheel_odom twist.covariance (vx=0.01, ωz=0.05), which FusionCore honors
+    # directly. These config values apply when the message cov is zero/negative.
+    # yaw_noise lowered 0.04 -> 0.02: wheel-differential yaw rate is far more
+    # accurate than WT901 gyro on flat ground with calibrated wheels.
     encoder.vel_noise: 0.15
-    encoder.yaw_noise: 0.04
+    encoder.yaw_noise: 0.02
 
     # GNSS: u-blox F9P RTK
     # base_noise_xy scales the GPS covariance. At 0.5 (tried on rtabmap)
