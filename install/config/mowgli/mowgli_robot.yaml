@@ -41,8 +41,15 @@ mowgli:
         headland_width: 0.18
         imu_x: 0.191
         imu_y: -0.176
-        imu_yaw: -2.781  # IMU chip physical mounting rotation around base_link Z
         imu_z: 0.095
+        # IMU mounting rotation (rad). Full roll/pitch/yaw so an upside-down
+        # or side-mounted chip is representable — firmware passes the WT901's
+        # chip-native axes through unchanged, so URDF is the sole correction.
+        # Current install: chip Z aligned with robot Z (verified: accel_z≈+10
+        # at rest), so roll=pitch=0; only yaw is non-zero.
+        imu_roll: 0.0
+        imu_pitch: 0.0
+        imu_yaw: -2.781  # 239° compass-equivalent — user measured
         lidar_enabled: true
         lidar_x: 0
         lidar_y: 0.024
