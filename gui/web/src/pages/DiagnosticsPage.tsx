@@ -1,12 +1,10 @@
 import {
     Alert,
-    App,
     Button,
     Card,
     Col,
     Collapse,
     Flex,
-    Popconfirm,
     Progress,
     Row,
     Space,
@@ -20,9 +18,7 @@ import {
     CloudServerOutlined,
     CompassOutlined,
     DashboardOutlined,
-    DeleteOutlined,
     ReloadOutlined,
-    SaveOutlined,
     SoundOutlined,
     ThunderboltOutlined,
     WarningOutlined,
@@ -38,12 +34,11 @@ import {useBTLog} from "../hooks/useBTLog.ts";
 import {useImu} from "../hooks/useImu.ts";
 import {useWheelTicks} from "../hooks/useWheelTicks.ts";
 import {useDiagnosticsSnapshot} from "../hooks/useDiagnosticsSnapshot.ts";
-import {useApi} from "../hooks/useApi.ts";
 import {useDiagnostics} from "../hooks/useDiagnostics.ts";
 import {useThemeMode} from "../theme/ThemeContext.tsx";
 import {useIsMobile} from "../hooks/useIsMobile";
 import {AbsolutePoseConstants} from "../types/ros.ts";
-import {useMemo, useState} from "react";
+import {useMemo} from "react";
 import {useSettings} from "../hooks/useSettings.ts";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -78,26 +73,6 @@ const ESC_STATUS: Record<number, {label: string; color: string}> = {
     201: {label: "Running", color: "success"},
 };
 
-function formatBytes(bytes: number): string {
-    if (bytes <= 0) return "0 B";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function relativeTime(timestamp: string): string {
-    if (!timestamp) return "--";
-    const diffMs = Date.now() - new Date(timestamp).getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return `${diffSec} seconds ago`;
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    return `${diffDay} day${diffDay !== 1 ? "s" : ""} ago`;
-}
-
 // ── sub-components ───────────────────────────────────────────────────────────
 
 function HealthBadge({label, color}: {label: string; color: string}) {
@@ -122,10 +97,6 @@ export const DiagnosticsPage = () => {
     const {snapshot, loading, refresh} = useDiagnosticsSnapshot();
     const {diagnostics} = useDiagnostics();
     const {settings} = useSettings();
-    const guiApi = useApi();
-    const {notification} = App.useApp();
-    const [slamSaving, setSlamSaving] = useState(false);
-    const [slamDeleting, setSlamDeleting] = useState(false);
 
     // ── derived values ───────────────────────────────────────────────────────
 
@@ -545,151 +516,17 @@ export const DiagnosticsPage = () => {
         </Row>
     );
 
-    // ── Cartographer helpers ─────────────────────────────────────────────────
+    // ── Section 3b: Configuration Cross-checks ──────────────────────────────
+    // Note: SLAM (Cartographer) was removed on the feat/kiss-icp branch. The
+    // occupancy grid is now published by map_server_node from recorded area
+    // polygons, so there is no pbstream to save/delete.
 
-    const handleSlamSave = async () => {
-        setSlamSaving(true);
-        try {
-            await guiApi.request({ path: "/diagnostics/slam/save", method: "POST", format: "json" });
-            notification.success({ message: "Cartographer state written to .pbstream" });
-            refresh();
-        } catch (e: any) {
-            notification.error({ message: "Failed to save Cartographer state", description: e.message });
-        } finally {
-            setSlamSaving(false);
-        }
-    };
-
-    const handleSlamDelete = async () => {
-        setSlamDeleting(true);
-        try {
-            await guiApi.request({ path: "/diagnostics/slam/delete", method: "POST", format: "json" });
-            notification.success({
-                message: "Cartographer state deleted",
-                description: "Restart the ROS2 container to begin fresh mapping.",
-                duration: 0,
-                btn: (
-                    <Button size="small" type="primary" onClick={restartRos2}>
-                        Restart ROS2 Now
-                    </Button>
-                ),
-            });
-            refresh();
-        } catch (e: any) {
-            notification.error({ message: "Failed to delete Cartographer state", description: e.message });
-        } finally {
-            setSlamDeleting(false);
-        }
-    };
-
-    const restartRos2 = async () => {
-        try {
-            const res = await guiApi.containers.containersList();
-            if (res.error) throw new Error(res.error.error);
-            const container = res.data.containers?.find((c: any) =>
-                c.names?.some((n: string) => n.includes("ros2"))
-            );
-            if (!container?.id) throw new Error("ROS2 container not found");
-            const restart = await guiApi.containers.containersCreate(container.id, "restart");
-            if (restart.error) throw new Error(restart.error.error);
-            notification.success({ message: "ROS2 container restarted" });
-        } catch (e: any) {
-            notification.error({ message: "Failed to restart ROS2", description: e.message });
-        }
-    };
-
-    // ── Section 3b: Cartographer State Management ───────────────────────────
-
-    const slamInfo = snapshot?.slam_info;
     const crossChecks = snapshot?.cross_checks;
     const crossCheckStatus = crossChecks?.overall_status ?? "ok";
 
-    const sectionSlam = (
+    const sectionCrossChecks = (
         <Row gutter={[12, 12]}>
-            <Col xs={24} lg={12}>
-                <Card
-                    title="Cartographer State"
-                    size="small"
-                    extra={
-                        <Typography.Text type="secondary" style={{fontSize: 11}}>
-                            .pbstream
-                        </Typography.Text>
-                    }
-                >
-                    <Row gutter={[12, 8]}>
-                        <Col span={24}>
-                            <Space>
-                                <Typography.Text type="secondary" style={{fontSize: 12}}>State file</Typography.Text>
-                                <Tag color={slamInfo?.map_file_exists ? "success" : "default"}>
-                                    {slamInfo?.map_file_exists ? "Present" : "Not saved yet"}
-                                </Tag>
-                            </Space>
-                        </Col>
-                        {slamInfo?.map_file_exists && (
-                            <>
-                                <Col span={12}>
-                                    <Statistic
-                                        title="Pbstream size"
-                                        value={formatBytes(slamInfo.pbstream_size_bytes)}
-                                    />
-                                </Col>
-                                <Col span={12}>
-                                    <Statistic
-                                        title="Last saved"
-                                        value={relativeTime(slamInfo.last_modified)}
-                                    />
-                                </Col>
-                                <Col span={24}>
-                                    <Typography.Text
-                                        type="secondary"
-                                        style={{fontSize: 11, fontFamily: "monospace", wordBreak: "break-all"}}
-                                    >
-                                        {slamInfo.map_path}
-                                    </Typography.Text>
-                                </Col>
-                            </>
-                        )}
-                        <Col span={24}>
-                            <Typography.Text type="secondary" style={{fontSize: 11}}>
-                                Cartographer does not autosave — the state file is written only when
-                                requested via `write_state`. Deleting the file does not reset the running
-                                node; restart the ROS2 container for a fresh session.
-                            </Typography.Text>
-                        </Col>
-                        <Col span={24}>
-                            <Space wrap>
-                                <Button
-                                    size="small"
-                                    icon={<SaveOutlined/>}
-                                    loading={slamSaving}
-                                    onClick={handleSlamSave}
-                                >
-                                    Write state (.pbstream)
-                                </Button>
-                                <Popconfirm
-                                    title="Delete Cartographer state"
-                                    description="This will remove the saved .pbstream file. Restart the ROS2 container to start a fresh mapping session. Continue?"
-                                    okText="Delete"
-                                    okType="danger"
-                                    cancelText="Cancel"
-                                    onConfirm={handleSlamDelete}
-                                >
-                                    <Button
-                                        size="small"
-                                        danger
-                                        icon={<DeleteOutlined/>}
-                                        loading={slamDeleting}
-                                        disabled={!slamInfo?.map_file_exists}
-                                    >
-                                        Delete state file
-                                    </Button>
-                                </Popconfirm>
-                            </Space>
-                        </Col>
-                    </Row>
-                </Card>
-            </Col>
-            <Col xs={24} lg={12}>
+            <Col xs={24}>
                 <Card
                     title="Configuration Cross-checks"
                     size="small"
@@ -948,9 +785,9 @@ export const DiagnosticsPage = () => {
                             children: sectionBtCoverage,
                         },
                         {
-                            key: "slam",
-                            label: "Cartographer State",
-                            children: sectionSlam,
+                            key: "cross_checks",
+                            label: "Configuration Cross-checks",
+                            children: sectionCrossChecks,
                         },
                         {
                             key: "sensors",
@@ -975,7 +812,7 @@ export const DiagnosticsPage = () => {
             <Col span={24}>{sectionSystem}</Col>
             <Col span={24}>{sectionLocalization}</Col>
             <Col span={24}>{sectionBtCoverage}</Col>
-            <Col span={24}>{sectionSlam}</Col>
+            <Col span={24}>{sectionCrossChecks}</Col>
             <Col span={24}>{sectionSensors}</Col>
             <Col span={24}>{sectionRosDiagnostics}</Col>
         </Row>

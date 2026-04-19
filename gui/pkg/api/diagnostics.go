@@ -28,7 +28,6 @@ type DiagnosticsSnapshot struct {
 	System      SystemHealth       `json:"system"`
 	Coverage    []AreaCoverageInfo `json:"coverage"`
 	CrossChecks CrossChecks        `json:"cross_checks"`
-	SlamInfo    SlamInfo           `json:"slam_info"`
 }
 
 // ContainerHealth holds the health summary of a single Docker container.
@@ -71,16 +70,6 @@ type DockPoseCheck struct {
 	HasConfig     bool    `json:"has_config"`
 }
 
-// SlamInfo holds Cartographer state file metadata.
-// Cartographer persists a single `.pbstream` file via the `write_state`
-// service; there is no separate posegraph/data pair like slam_toolbox had.
-type SlamInfo struct {
-	MapFileExists bool   `json:"map_file_exists"`
-	PbstreamSize  int64  `json:"pbstream_size_bytes"`
-	LastModified  string `json:"last_modified"`
-	MapPath       string `json:"map_path"`
-}
-
 // MowingSession represents a single mowing session stored in the DB.
 type MowingSession struct {
 	ID              string  `json:"id"`
@@ -111,10 +100,13 @@ func DiagnosticsRoutes(r *gin.RouterGroup, dockerProvider types.IDockerProvider,
 	group := r.Group("/diagnostics")
 	group.GET("/snapshot", getDiagnosticsSnapshot(dockerProvider, rosProvider, dbProvider))
 
-	// Cartographer state tools
-	group.GET("/slam/info", getSlamInfo())
-	group.POST("/slam/save", postSlamSave(rosProvider))
-	group.POST("/slam/delete", postSlamDelete(rosProvider))
+	// Legacy SLAM endpoints — SLAM (Cartographer) was removed on the feat/kiss-icp
+	// branch. The occupancy grid is now published by map_server_node directly from
+	// recorded area polygons; there is no pbstream to save/delete. These stubs
+	// return 410 Gone so older GUI bundles calling them get a clear error.
+	group.GET("/slam/info", slamRemovedGone)
+	group.POST("/slam/save", slamRemovedGone)
+	group.POST("/slam/delete", slamRemovedGone)
 
 	// Mowing sessions
 	group.GET("/sessions", getSessions(dbProvider))
@@ -184,9 +176,6 @@ func getDiagnosticsSnapshot(dockerProvider types.IDockerProvider, rosProvider ty
 
 		// --- Cross-checks ---
 		snapshot.CrossChecks = buildCrossChecks(dbProvider)
-
-		// --- Cartographer state info ---
-		snapshot.SlamInfo = readSlamInfo("/ros2_ws/maps/garden_map.pbstream")
 
 		c.JSON(http.StatusOK, snapshot)
 	}
@@ -271,103 +260,19 @@ func extractYAMLFloat(data map[string]interface{}, key string) float64 {
 	return 0
 }
 
-// readSlamInfo checks for a Cartographer state file (.pbstream) on disk.
-// Cartographer does not autosave — the file is only written when the
-// `write_state` service is invoked (see postSlamSave).
-func readSlamInfo(pbstreamPath string) SlamInfo {
-	info := SlamInfo{MapPath: pbstreamPath}
-
-	if stat, err := os.Stat(pbstreamPath); err == nil {
-		info.MapFileExists = true
-		info.PbstreamSize = stat.Size()
-		info.LastModified = stat.ModTime().UTC().Format(time.RFC3339)
-	}
-
-	return info
-}
-
 // ---------------------------------------------------------------------------
-// Cartographer State Tools
+// Legacy SLAM (Cartographer) stubs
 // ---------------------------------------------------------------------------
 
-const cartographerPbstreamPath = "/ros2_ws/maps/garden_map.pbstream"
-
-// getSlamInfo returns Cartographer state file metadata.
-func getSlamInfo() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		info := readSlamInfo(cartographerPbstreamPath)
-		c.JSON(http.StatusOK, info)
-	}
-}
-
-// postSlamSave triggers a Cartographer state dump via the `write_state` service.
-// Cartographer does not autosave — this is how an operator captures the current
-// submap graph to a .pbstream file for later reload.
-func postSlamSave(rosProvider types.IRosProvider) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-		defer cancel()
-
-		// cartographer_ros_msgs/srv/WriteState
-		// Request:  string filename, bool include_unfinished_submaps
-		// Response: cartographer_ros_msgs/StatusResponse status
-		type WriteStateReq struct {
-			Filename                 string `json:"filename"`
-			IncludeUnfinishedSubmaps bool   `json:"include_unfinished_submaps"`
-		}
-		type StatusResponse struct {
-			Code    int32  `json:"code"`
-			Message string `json:"message"`
-		}
-		type WriteStateRes struct {
-			Status StatusResponse `json:"status"`
-		}
-
-		req := WriteStateReq{
-			Filename:                 cartographerPbstreamPath,
-			IncludeUnfinishedSubmaps: true,
-		}
-		var res WriteStateRes
-		if err := rosProvider.CallService(ctx, "/cartographer_node/write_state", &req, &res, "cartographer_ros_msgs/srv/WriteState"); err != nil {
-			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to write Cartographer state: " + err.Error()})
-			return
-		}
-
-		// Code 0 == OK in cartographer_ros_msgs/StatusCode.
-		if res.Status.Code != 0 {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"ok":      false,
-				"message": fmt.Sprintf("Cartographer returned code %d: %s", res.Status.Code, res.Status.Message),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"ok": true, "message": "Cartographer state saved", "path": cartographerPbstreamPath})
-	}
-}
-
-// postSlamDelete deletes the Cartographer state file on disk.
-// The running cartographer_node keeps its in-memory graph; to truly "start
-// fresh" the ROS2 container must be restarted.
-func postSlamDelete(_ types.IRosProvider) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		path := cartographerPbstreamPath
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"ok":      false,
-				"deleted": []string{},
-				"errors":  []string{fmt.Sprintf("Failed to delete %s: %v", path, err)},
-				"message": "Could not delete Cartographer state. Restart ROS2 to start fresh mapping.",
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"ok":      true,
-			"deleted": []string{path},
-			"message": "Cartographer state deleted. Restart ROS2 container to start fresh mapping.",
-		})
-	}
+// slamRemovedGone returns a 410 Gone response for any legacy /diagnostics/slam/*
+// endpoint. SLAM was removed on the feat/kiss-icp branch: the occupancy grid
+// is published by map_server_node from recorded area polygons, so there is no
+// pbstream to save/delete. Older GUI bundles calling these endpoints will see
+// a clear error instead of a 404.
+func slamRemovedGone(c *gin.Context) {
+	c.JSON(http.StatusGone, ErrorResponse{
+		Error: "SLAM removed; occupancy grid is published by map_server_node from area polygons. No save needed.",
+	})
 }
 
 // ---------------------------------------------------------------------------
