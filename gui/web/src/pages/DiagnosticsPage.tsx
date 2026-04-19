@@ -545,16 +545,16 @@ export const DiagnosticsPage = () => {
         </Row>
     );
 
-    // ── SLAM helpers ─────────────────────────────────────────────────────────
+    // ── Cartographer helpers ─────────────────────────────────────────────────
 
     const handleSlamSave = async () => {
         setSlamSaving(true);
         try {
             await guiApi.request({ path: "/diagnostics/slam/save", method: "POST", format: "json" });
-            notification.success({ message: "SLAM map saved successfully" });
+            notification.success({ message: "Cartographer state written to .pbstream" });
             refresh();
         } catch (e: any) {
-            notification.error({ message: "Failed to save SLAM map", description: e.message });
+            notification.error({ message: "Failed to save Cartographer state", description: e.message });
         } finally {
             setSlamSaving(false);
         }
@@ -565,7 +565,7 @@ export const DiagnosticsPage = () => {
         try {
             await guiApi.request({ path: "/diagnostics/slam/delete", method: "POST", format: "json" });
             notification.success({
-                message: "SLAM map deleted",
+                message: "Cartographer state deleted",
                 description: "Restart the ROS2 container to begin fresh mapping.",
                 duration: 0,
                 btn: (
@@ -576,7 +576,7 @@ export const DiagnosticsPage = () => {
             });
             refresh();
         } catch (e: any) {
-            notification.error({ message: "Failed to delete SLAM map", description: e.message });
+            notification.error({ message: "Failed to delete Cartographer state", description: e.message });
         } finally {
             setSlamDeleting(false);
         }
@@ -598,7 +598,7 @@ export const DiagnosticsPage = () => {
         }
     };
 
-    // ── Section 3b: SLAM Map Management ─────────────────────────────────────
+    // ── Section 3b: Cartographer State Management ───────────────────────────
 
     const slamInfo = snapshot?.slam_info;
     const crossChecks = snapshot?.cross_checks;
@@ -607,13 +607,21 @@ export const DiagnosticsPage = () => {
     const sectionSlam = (
         <Row gutter={[12, 12]}>
             <Col xs={24} lg={12}>
-                <Card title="SLAM Map File" size="small">
+                <Card
+                    title="Cartographer State"
+                    size="small"
+                    extra={
+                        <Typography.Text type="secondary" style={{fontSize: 11}}>
+                            .pbstream
+                        </Typography.Text>
+                    }
+                >
                     <Row gutter={[12, 8]}>
                         <Col span={24}>
                             <Space>
-                                <Typography.Text type="secondary" style={{fontSize: 12}}>Map file</Typography.Text>
-                                <Tag color={slamInfo?.map_file_exists ? "success" : "error"}>
-                                    {slamInfo?.map_file_exists ? "Present" : "Missing"}
+                                <Typography.Text type="secondary" style={{fontSize: 12}}>State file</Typography.Text>
+                                <Tag color={slamInfo?.map_file_exists ? "success" : "default"}>
+                                    {slamInfo?.map_file_exists ? "Present" : "Not saved yet"}
                                 </Tag>
                             </Space>
                         </Col>
@@ -621,20 +629,15 @@ export const DiagnosticsPage = () => {
                             <>
                                 <Col span={12}>
                                     <Statistic
-                                        title="Posegraph"
-                                        value={formatBytes(slamInfo.posegraph_size_bytes)}
+                                        title="Pbstream size"
+                                        value={formatBytes(slamInfo.pbstream_size_bytes)}
                                     />
                                 </Col>
                                 <Col span={12}>
                                     <Statistic
-                                        title="Data file"
-                                        value={formatBytes(slamInfo.data_file_size_bytes)}
+                                        title="Last saved"
+                                        value={relativeTime(slamInfo.last_modified)}
                                     />
-                                </Col>
-                                <Col span={24}>
-                                    <Typography.Text type="secondary" style={{fontSize: 12}}>
-                                        Last modified: {relativeTime(slamInfo.last_modified)}
-                                    </Typography.Text>
                                 </Col>
                                 <Col span={24}>
                                     <Typography.Text
@@ -647,6 +650,13 @@ export const DiagnosticsPage = () => {
                             </>
                         )}
                         <Col span={24}>
+                            <Typography.Text type="secondary" style={{fontSize: 11}}>
+                                Cartographer does not autosave — the state file is written only when
+                                requested via `write_state`. Deleting the file does not reset the running
+                                node; restart the ROS2 container for a fresh session.
+                            </Typography.Text>
+                        </Col>
+                        <Col span={24}>
                             <Space wrap>
                                 <Button
                                     size="small"
@@ -654,11 +664,11 @@ export const DiagnosticsPage = () => {
                                     loading={slamSaving}
                                     onClick={handleSlamSave}
                                 >
-                                    Save Map
+                                    Write state (.pbstream)
                                 </Button>
                                 <Popconfirm
-                                    title="Delete SLAM map"
-                                    description="This will delete the SLAM map. The robot will start fresh mapping on next boot. Continue?"
+                                    title="Delete Cartographer state"
+                                    description="This will remove the saved .pbstream file. Restart the ROS2 container to start a fresh mapping session. Continue?"
                                     okText="Delete"
                                     okType="danger"
                                     cancelText="Cancel"
@@ -671,7 +681,7 @@ export const DiagnosticsPage = () => {
                                         loading={slamDeleting}
                                         disabled={!slamInfo?.map_file_exists}
                                     >
-                                        Delete Map
+                                        Delete state file
                                     </Button>
                                 </Popconfirm>
                             </Space>
@@ -939,7 +949,7 @@ export const DiagnosticsPage = () => {
                         },
                         {
                             key: "slam",
-                            label: "SLAM Map Management",
+                            label: "Cartographer State",
                             children: sectionSlam,
                         },
                         {
