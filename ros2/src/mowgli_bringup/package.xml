@@ -34,8 +34,9 @@
 
   <!-- Localization -->
   <exec_depend>fusioncore_ros</exec_depend>
-  <!-- LiDAR odometry (optional drift-correction during GPS degradation) -->
-  <exec_depend>kiss_icp</exec_depend>
+  <!-- KISS-ICP is built from source as a submodule under ros2/src/kiss_icp;
+       no rosdep entry because it is not in the ROS2 index for Kilted. -->
+
 
   <!-- Velocity multiplexing -->
   <exec_depend>twist_mux</exec_depend>

@@ -1,3 +1,6 @@
 [submodule "ros2/src/fusioncore"]
 	path = ros2/src/fusioncore
 	url = https://github.com/cedbossneo/fusioncore.git
+[submodule "ros2/src/kiss_icp"]
+	path = ros2/src/kiss_icp
+	url = https://github.com/PRBonn/kiss-icp.git
