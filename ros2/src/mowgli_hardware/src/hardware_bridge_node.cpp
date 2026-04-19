@@ -59,6 +59,15 @@
 #include "mowgli_hardware/ll_datatypes.hpp"
 #include "mowgli_hardware/packet_handler.hpp"
 #include "mowgli_hardware/serial_port.hpp"
+
+// High-level mode constants — must match HighLevelStatus.msg and the
+// HL_MODE_* defines in firmware/mowgli_protocol.h. Declared locally to
+// avoid a brittle relative include of the firmware-shared header.
+static constexpr uint8_t HL_MODE_NULL           = 0u;  ///< Emergency / transitional
+static constexpr uint8_t HL_MODE_IDLE           = 1u;  ///< Docked or between missions
+static constexpr uint8_t HL_MODE_AUTONOMOUS     = 2u;  ///< Autonomous mowing
+static constexpr uint8_t HL_MODE_RECORDING      = 3u;  ///< Area recording
+static constexpr uint8_t HL_MODE_MANUAL_MOWING  = 4u;  ///< Manual teleop with blade
 #include "mowgli_interfaces/msg/emergency.hpp"
 #include "mowgli_interfaces/msg/high_level_status.hpp"
 #include "mowgli_interfaces/msg/power.hpp"
@@ -769,29 +778,11 @@ private:
     LlOdometry pkt{};
     std::memcpy(&pkt, data, sizeof(LlOdometry));
 
-    const auto stamp = now();
-
-    // Debug: log signed tick values + firmware-computed velocity periodically
-    static int odom_debug_count = 0;
-    if (++odom_debug_count % 50 == 0)
-    {
-      RCLCPP_INFO(get_logger(),
-                  "Odom: L_ticks=%d R_ticks=%d dt=%u  L_v=%d R_v=%d mm/s",
-                  pkt.left_ticks,
-                  pkt.right_ticks,
-                  pkt.dt_millis,
-                  pkt.left_velocity_mm_s,
-                  pkt.right_velocity_mm_s);
-    }
-
-    // Signed tick deltas — polarity already encodes direction, no separate
-    // direction byte to re-sign.
+    // Signed tick deltas since last firmware packet (polarity = direction).
     const int32_t d_left  = pkt.left_ticks  - prev_left_ticks_;
     const int32_t d_right = pkt.right_ticks - prev_right_ticks_;
     prev_left_ticks_  = pkt.left_ticks;
     prev_right_ticks_ = pkt.right_ticks;
-
-    wheels_stationary_ = (d_left == 0 && d_right == 0);
 
     if (!odom_initialized_)
     {
@@ -799,43 +790,67 @@ private:
       return;
     }
 
+    // ----- Aggregate firmware packets into ~10 Hz wheel_odom publishes -----
+    // Firmware packets arrive at ~47 Hz (every ~21 ms). At slow speeds this
+    // gives only 0-3 ticks per window, so single-tick encoder noise (1 tick
+    // = ~167 mm/s over 21 ms!) gets amplified into phantom velocity spikes
+    // that FusionCore trusts thanks to the tight wheel covariance. Sum 5
+    // packets (~100 ms, ~15 ticks at 0.5 m/s) so the velocity denominator
+    // grows and single-tick noise collapses to ~7 % relative error.
+    odom_acc_delta_left_  += d_left;
+    odom_acc_delta_right_ += d_right;
+    odom_acc_dt_ms_       += pkt.dt_millis;
+
+    static constexpr uint32_t kAggregateMs = 100;
+    if (odom_acc_dt_ms_ < kAggregateMs)
+    {
+      return;
+    }
+
+    const auto stamp  = now();
+    const int32_t acc_d_left  = odom_acc_delta_left_;
+    const int32_t acc_d_right = odom_acc_delta_right_;
+    const uint32_t acc_dt_ms  = odom_acc_dt_ms_;
+    odom_acc_delta_left_  = 0;
+    odom_acc_delta_right_ = 0;
+    odom_acc_dt_ms_       = 0;
+
+    wheels_stationary_ = (acc_d_left == 0 && acc_d_right == 0);
+
+    // Debug: log the aggregated window periodically.
+    static int odom_debug_count = 0;
+    if (++odom_debug_count % 10 == 0)
+    {
+      RCLCPP_INFO(get_logger(),
+                  "Odom: acc_dL=%d acc_dR=%d acc_dt=%u ms  (cum L=%d R=%d)",
+                  acc_d_left, acc_d_right, acc_dt_ms,
+                  pkt.left_ticks, pkt.right_ticks);
+    }
+
     constexpr double kWheelBase = 0.325;
     constexpr double kTicksPerMetre = 300.0;
-
-    // Prefer the firmware-computed per-wheel velocity (hardware-timer-accurate
-    // dt, no USB-arrival jitter). Fall back to tick-derived velocity only if
-    // the firmware reports dt=0 (would indicate a bug).
-    double vx   = 0.0;
-    double vyaw = 0.0;
-    if (pkt.dt_millis > 0u)
-    {
-      const double v_left_mps  = static_cast<double>(pkt.left_velocity_mm_s)  / 1000.0;
-      const double v_right_mps = static_cast<double>(pkt.right_velocity_mm_s) / 1000.0;
-      vx   = (v_left_mps + v_right_mps) * 0.5;
-      vyaw = (v_right_mps - v_left_mps) / kWheelBase;
-    }
-    else
-    {
-      const double dt_sec   = 0.02;  // assume nominal 20 ms if firmware reports 0
-      const double d_left_m  = static_cast<double>(d_left)  / kTicksPerMetre;
-      const double d_right_m = static_cast<double>(d_right) / kTicksPerMetre;
-      vx   = (d_left_m + d_right_m) * 0.5 / dt_sec;
-      vyaw = (d_right_m - d_left_m) / kWheelBase / dt_sec;
-    }
+    const double dt_sec = static_cast<double>(acc_dt_ms) / 1000.0;
+    const double d_left_m  = static_cast<double>(acc_d_left)  / kTicksPerMetre;
+    const double d_right_m = static_cast<double>(acc_d_right) / kTicksPerMetre;
+    double vx   = (d_left_m + d_right_m) * 0.5 / dt_sec;
+    double vyaw = (d_right_m - d_left_m) / kWheelBase / dt_sec;
 
     auto msg = nav_msgs::msg::Odometry{};
     msg.header.stamp = stamp;
     msg.header.frame_id = "odom";
     msg.child_frame_id = "base_link";
 
-    // When charging AND idle, the robot is mechanically fixed to the dock.
-    // Force zero velocity with very tight covariance so the EKF
-    // trusts this "not moving" signal over process noise drift.
-    // During undocking (current_mode_ != 0), the charger bit may still be
-    // set while the robot is backing off the contacts — don't zero odom
-    // or SLAM will see zero motion while LiDAR scans shift, corrupting
-    // the map.
-    const bool force_zero = is_charging_ && (current_mode_ == 0u);
+    // Force zero when the BT says the robot should not be moving. Covers:
+    //   NULL  (0) = emergency / transitional
+    //   IDLE  (1) = docked or between missions (motors commanded zero)
+    // AUTONOMOUS / RECORDING / MANUAL_MOWING let real motion through.
+    // Previously this was is_charging_ AND mode_NULL, which missed the
+    // common "IDLE on the dock" case — wheel encoder noise then leaked
+    // through into FusionCore, causing yaw random-walk and GPS-lever-arm
+    // position swings (seen as 2 m/s teleporting while physically still).
+    const bool force_zero =
+        current_mode_ == HL_MODE_NULL ||
+        current_mode_ == HL_MODE_IDLE;
     if (force_zero)
     {
       vx = 0.0;
@@ -845,23 +860,19 @@ private:
     msg.twist.twist.linear.x = vx;
     msg.twist.twist.angular.z = vyaw;
 
-    // Covariance: when docked and idle, very tight (certain we're not moving).
-    // When driving, loose (wheel slip on grass).
+    // Covariance: force_zero → very tight (we're certain we're not moving).
+    // Otherwise: linear vel σ = 0.1 m/s, yaw rate σ = 0.03 rad/s (tight
+    // wheel trust — calibrated drivetrain, dominated by grass slip ~3%).
     const double vel_var = force_zero ? 1e-6 : 0.01;
     msg.twist.covariance[0] = vel_var;  // vx variance
     // Non-holonomic constraint: diff-drive can't slide sideways. Tight
-    // variance on VY=0 tells FusionCore to treat this as a hard
-    // constraint; leaving it at 1e6 ("unknown") let GPS + IMU noise
-    // accumulate into apparent lateral drift during outdoor runs.
+    // variance on VY=0 tells FusionCore to treat this as a hard constraint;
+    // leaving at 1e6 ("unknown") lets GPS+IMU noise accumulate as apparent
+    // lateral drift during outdoor runs.
     msg.twist.covariance[7] = 1e-4;  // vy (enforce VY = 0)
     msg.twist.covariance[14] = 1e6;  // vz - unknown
     msg.twist.covariance[21] = 1e6;  // wx - unknown
     msg.twist.covariance[28] = 1e6;  // wy - unknown
-    // wz variance tightened 0.05 -> 9e-4 (σ 0.224 -> 0.03 rad/s, 1.7°/s).
-    // Wheels are calibrated to 0.2% linear error; diff-drive yaw rate σ is
-    // dominated by grass slip (~3%) not encoder resolution. Tighter wheel
-    // cov means FusionCore trusts wheel ωz more than WT901 gyro (under-
-    // reports yaw rate by 17%). Floor at 1e-6 when docked+idle (known zero).
     msg.twist.covariance[35] = force_zero ? 1e-6 : 9e-4;  // wz variance
 
     pub_wheel_odom_->publish(msg);
@@ -1056,6 +1067,12 @@ private:
   int32_t prev_right_ticks_{0};
   bool odom_initialized_{false};
   bool wheels_stationary_{true};
+  // Aggregation window: sum firmware packets (~21 ms) until we reach
+  // kAggregateMs (~100 ms) and publish one /wheel_odom at ~10 Hz. Widens
+  // the velocity denominator so single-tick encoder noise doesn't blow up.
+  int32_t  odom_acc_delta_left_{0};
+  int32_t  odom_acc_delta_right_{0};
+  uint32_t odom_acc_dt_ms_{0};
 
   // IMU calibration state (computed while docked and idle)
   int imu_cal_samples_{200};
