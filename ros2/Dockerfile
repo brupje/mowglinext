@@ -168,12 +168,20 @@ RUN ln -sf fusioncore/fusioncore_core src/fusioncore_core \
  && ln -sf fusioncore/fusioncore_ros  src/fusioncore_ros \
  && ln -sf fusioncore/compass_msgs    src/compass_msgs
 
+# KISS-ICP repo contains both a cpp library (cpp/) and a ROS2 package (ros/).
+# Colcon doesn't auto-discover the nested ros/package.xml, and the top-level
+# kiss_icp/ has no package.xml of its own. Symlink ros/ to the workspace root
+# so colcon finds kiss_icp directly. KISS-ICP's CMakeLists detects the symlink
+# (IS_SYMLINK branch) and fetches the cpp lib via FetchContent at build time,
+# avoiding the `../cpp/` relative path trap.
+RUN ln -sf kiss_icp/ros src/kiss_icp_ros
+
 # Build all packages (mowgli_interfaces is already built and cached)
 RUN /bin/bash -c "\
     source /opt/ros/kilted/setup.bash && \
     source install/setup.bash && \
     colcon build \
-      --packages-ignore fusioncore fusioncore_gazebo \
+      --packages-ignore fusioncore fusioncore_gazebo kiss-icp \
       --cmake-args -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DBUILD_TESTING=OFF \
       --parallel-workers \$(nproc) \
       --event-handlers console_cohesion+ \
