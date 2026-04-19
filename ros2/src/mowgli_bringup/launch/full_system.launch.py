@@ -71,18 +71,6 @@ def generate_launch_description() -> LaunchDescription:
         description="Serial port for the hardware bridge.",
     )
 
-    slam_arg = DeclareLaunchArgument(
-        "slam",
-        default_value="true",
-        description="Run slam_toolbox when true; skip when using a pre-built map.",
-    )
-
-    map_arg = DeclareLaunchArgument(
-        "map",
-        default_value="",
-        description="Absolute path to a pre-built map yaml file (used when slam=false).",
-    )
-
     enable_mqtt_arg = DeclareLaunchArgument(
         "enable_mqtt",
         default_value="false",
@@ -104,7 +92,7 @@ def generate_launch_description() -> LaunchDescription:
     use_lidar_arg = DeclareLaunchArgument(
         "use_lidar",
         default_value="true",
-        description="Enable LiDAR-dependent nodes (SLAM, obstacle tracker, slam heading). Set to false for GPS-only operation.",
+        description="Enable LiDAR-dependent nodes (KISS-ICP drift correction, obstacle layer, collision monitor scan). Set to false for GPS-only operation without a LiDAR.",
     )
 
     # ------------------------------------------------------------------
@@ -112,8 +100,6 @@ def generate_launch_description() -> LaunchDescription:
     # ------------------------------------------------------------------
     use_sim_time = LaunchConfiguration("use_sim_time")
     serial_port = LaunchConfiguration("serial_port")
-    slam = LaunchConfiguration("slam")
-    map_yaml = LaunchConfiguration("map")
     enable_mqtt = LaunchConfiguration("enable_mqtt")
     enable_foxglove = LaunchConfiguration("enable_foxglove")
     foxglove_port = LaunchConfiguration("foxglove_port")
@@ -153,7 +139,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
-    # 2. navigation.launch.py — SLAM, dual EKF, Nav2
+    # 2. navigation.launch.py — FusionCore + Nav2 (+ optional KISS-ICP)
     # ------------------------------------------------------------------
     navigation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -161,8 +147,6 @@ def generate_launch_description() -> LaunchDescription:
         ),
         launch_arguments={
             "use_sim_time": use_sim_time,
-            "slam": slam,
-            "map": map_yaml,
             "use_lidar": use_lidar,
         }.items(),
     )
@@ -340,8 +324,6 @@ def generate_launch_description() -> LaunchDescription:
             # Arguments
             use_sim_time_arg,
             serial_port_arg,
-            slam_arg,
-            map_arg,
             enable_mqtt_arg,
             enable_foxglove_arg,
             foxglove_port_arg,

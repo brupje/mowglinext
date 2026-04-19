@@ -73,18 +73,6 @@ def generate_launch_description() -> LaunchDescription:
         description="Use simulation (Gazebo) clock when true.",
     )
 
-    slam_arg = DeclareLaunchArgument(
-        "slam",
-        default_value="True",
-        description="Run Cartographer SLAM when True; skip when using a pre-built map.",
-    )
-
-    map_yaml_arg = DeclareLaunchArgument(
-        "map",
-        default_value="",
-        description="Absolute path to a pre-built map yaml file (used when slam=false).",
-    )
-
     use_ekf_arg = DeclareLaunchArgument(
         "use_ekf",
         default_value="True",
@@ -94,14 +82,13 @@ def generate_launch_description() -> LaunchDescription:
     use_lidar_arg = DeclareLaunchArgument(
         "use_lidar",
         default_value="true",
-        description="When false, use nav2_params_no_lidar.yaml (no obstacle layer, collision monitor pass-through).",
+        description="When false, use nav2_params_no_lidar.yaml (no obstacle layer, collision monitor pass-through). Also skips KISS-ICP LiDAR odometry.",
     )
 
     # ------------------------------------------------------------------
     # Resolved substitutions
     # ------------------------------------------------------------------
     use_sim_time = LaunchConfiguration("use_sim_time")
-    slam = LaunchConfiguration("slam")
     use_ekf = LaunchConfiguration("use_ekf")
     use_lidar = LaunchConfiguration("use_lidar")
 
@@ -181,24 +168,8 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
-    # 1. Cartographer — online SLAM (only when slam=true)
-    #    Publishes map→odom TF from LiDAR scan matching.
-    #    GPS is fused in FusionCore, not in Cartographer.
-    # ------------------------------------------------------------------
-    cartographer_launch = IncludeLaunchDescription(
-        condition=IfCondition(slam),
-        launch_description_source=PythonLaunchDescriptionSource(
-            os.path.join(bringup_dir, "launch", "cartographer.launch.py")
-        ),
-        launch_arguments={
-            "use_sim_time": use_sim_time,
-        }.items(),
-    )
-
-    # ------------------------------------------------------------------
-    # 2. FusionCore — single UKF (GPS + IMU + wheels)
-    #    Publishes odom → base_footprint TF.
-    #    Cartographer publishes map → odom TF.
+    # 1. FusionCore — single UKF (GPS + IMU + wheels[+ LiDAR twist later])
+    #    Publishes odom → base_footprint TF. GPS-RTK anchored.
     # ------------------------------------------------------------------
     fusioncore_node = LifecycleNode(
         condition=IfCondition(use_ekf),
@@ -251,12 +222,13 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
-    # 3. Static map→odom fallback (no-SLAM mode)
-    # When SLAM is disabled, FusionCore's odom is already GPS-anchored
-    # so map≈odom. Publish a static identity TF to satisfy Nav2.
+    # 2. Static map→odom identity
+    #    FusionCore's odom is GPS-RTK anchored (σ ~3mm when Fixed), so the
+    #    map frame IS the GPS ENU frame. No SLAM correction needed when
+    #    GPS is healthy. During GPS degradation, KISS-ICP publishes
+    #    corrections to map→odom (see kiss_icp.launch.py, gated on use_lidar).
     # ------------------------------------------------------------------
     static_map_odom_tf = Node(
-        condition=UnlessCondition(slam),
         package="tf2_ros",
         executable="static_transform_publisher",
         name="static_map_odom_tf",
@@ -279,14 +251,14 @@ def generate_launch_description() -> LaunchDescription:
         "lib", "mowgli_bringup", "wait_for_tf.py"
     )
 
-    wait_for_slam_tf = ExecuteProcess(
+    wait_for_map_odom_tf = ExecuteProcess(
         cmd=[
             "python3", wait_for_tf_script,
             "--parent", "map",
             "--child", "odom",
             "--timeout", "120",
         ],
-        name="wait_for_slam_tf",
+        name="wait_for_map_odom_tf",
         output="screen",
     )
 
@@ -311,7 +283,7 @@ def generate_launch_description() -> LaunchDescription:
     # Launch Nav2 only after the map→odom TF is available
     nav2_after_tf = RegisterEventHandler(
         OnProcessExit(
-            target_action=wait_for_slam_tf,
+            target_action=wait_for_map_odom_tf,
             on_exit=[nav2_navigation_group],
         )
     )
@@ -322,16 +294,13 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             use_sim_time_arg,
-            slam_arg,
-            map_yaml_arg,
             use_ekf_arg,
             use_lidar_arg,
-            cartographer_launch,
             static_map_odom_tf,
             fusioncore_node,
             fusioncore_configure,
             fusioncore_start,
-            wait_for_slam_tf,
+            wait_for_map_odom_tf,
             nav2_after_tf,
         ]
     )

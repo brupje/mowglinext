@@ -21,8 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-kilted-nav2-lifecycle-manager \
     ros-kilted-nav2-waypoint-follower \
     ros-kilted-nav2-velocity-smoother \
-    # SLAM — Cartographer is the active SLAM backend.
-    ros-kilted-cartographer-ros \
+    # LiDAR odometry (KISS-ICP, optional drift correction during GPS loss)
+    ros-kilted-kiss-icp \
     # Motion control
     ros-kilted-twist-mux \
     # Behavior trees
