@@ -147,6 +147,7 @@ install(
 install(
   PROGRAMS
     scripts/calibrate_imu_yaw_node.py
+    scripts/kiss_icp_encoder_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
