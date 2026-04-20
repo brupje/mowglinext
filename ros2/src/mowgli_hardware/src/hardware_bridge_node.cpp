@@ -411,7 +411,7 @@ private:
       {
         imu_cal_collecting_ = true;
         imu_cal_count_ = 0;
-        imu_cal_sum_ax_ = imu_cal_sum_ay_ = 0.0;
+        imu_cal_sum_ax_ = imu_cal_sum_ay_ = imu_cal_sum_az_ = 0.0;
         imu_cal_sum_gx_ = imu_cal_sum_gy_ = imu_cal_sum_gz_ = 0.0;
         imu_cal_samples_ax_.clear();
         imu_cal_samples_ay_.clear();
@@ -429,7 +429,7 @@ private:
         imu_cal_ready_ = false;
         imu_cal_collecting_ = true;
         imu_cal_count_ = 0;
-        imu_cal_sum_ax_ = imu_cal_sum_ay_ = 0.0;
+        imu_cal_sum_ax_ = imu_cal_sum_ay_ = imu_cal_sum_az_ = 0.0;
         imu_cal_sum_gx_ = imu_cal_sum_gy_ = imu_cal_sum_gz_ = 0.0;
         imu_cal_samples_ax_.clear();
         imu_cal_samples_ay_.clear();
@@ -592,6 +592,7 @@ private:
 
     double ax = static_cast<double>(pkt.acceleration_mss[0]);
     double ay = static_cast<double>(pkt.acceleration_mss[1]);
+    double az = static_cast<double>(pkt.acceleration_mss[2]);
     double gx = static_cast<double>(pkt.gyro_rads[0]);
     double gy = static_cast<double>(pkt.gyro_rads[1]);
     double gz = static_cast<double>(pkt.gyro_rads[2]);
@@ -600,11 +601,13 @@ private:
     // offsets (mean) and covariances (variance). Same algorithm as firmware
     // IMU_CalibrateExternal() but run on the ROS2 side each time the robot
     // docks — catches residual drift the boot calibration missed.
-    // Accel Z is not calibrated (preserves gravity for sensor fusion).
+    // Accel Z is not calibrated (preserves gravity for sensor fusion), but
+    // we still sum it so we can report implied mounting pitch/roll.
     if (imu_cal_collecting_)
     {
       imu_cal_sum_ax_ += ax;
       imu_cal_sum_ay_ += ay;
+      imu_cal_sum_az_ += az;
       imu_cal_sum_gx_ += gx;
       imu_cal_sum_gy_ += gy;
       imu_cal_sum_gz_ += gz;
@@ -659,6 +662,32 @@ private:
                     imu_cal_cov_gx_,
                     imu_cal_cov_gy_,
                     imu_cal_cov_gz_);
+
+        // ---- Implied mounting pitch/roll from at-rest gravity vector ----
+        // At rest on a level dock, the chip accel reads [0, 0, g] in the
+        // *IMU* frame. If it reads non-zero on X/Y, either (a) the IMU is
+        // physically tilted relative to base_link (mounting error), or
+        // (b) the chip has a factory accel bias. Assuming the dock is
+        // level, the angular offsets below capture the combined effect,
+        // which you can feed into mowgli_robot.yaml as imu_pitch / imu_roll
+        // so the URDF base_link->imu_link rotation matches reality.
+        //   pitch (nose-down = +) = atan2(-ax_raw, az_raw)
+        //   roll  (right-down = +) = atan2( ay_raw, az_raw)
+        // Magnitudes ≫ ~1° warrant YAML correction; smaller values are
+        // likely chip bias and are already removed by this calibration
+        // for ax/ay on every future sample.
+        const double az_mean = imu_cal_sum_az_ / n;
+        const double a_mag = std::sqrt(imu_cal_offset_ax_ * imu_cal_offset_ax_ +
+                                       imu_cal_offset_ay_ * imu_cal_offset_ay_ +
+                                       az_mean * az_mean);
+        const double implied_pitch_deg = std::atan2(-imu_cal_offset_ax_, az_mean) * 180.0 / M_PI;
+        const double implied_roll_deg  = std::atan2( imu_cal_offset_ay_, az_mean) * 180.0 / M_PI;
+        RCLCPP_INFO(get_logger(),
+                    "Implied mounting tilt: pitch=%.3f°, roll=%.3f° "
+                    "(|accel|=%.3f m/s², az_mean=%.3f). "
+                    "If magnitudes exceed ~1° set imu_pitch / imu_roll in "
+                    "mowgli_robot.yaml and redeploy.",
+                    implied_pitch_deg, implied_roll_deg, a_mag, az_mean);
 
         // Free sample buffers
         imu_cal_samples_ax_.clear();
@@ -1170,7 +1199,7 @@ private:
   bool imu_cal_collecting_{false};
   bool imu_cal_ready_{false};
   int imu_cal_count_{0};
-  double imu_cal_sum_ax_{0.0}, imu_cal_sum_ay_{0.0};
+  double imu_cal_sum_ax_{0.0}, imu_cal_sum_ay_{0.0}, imu_cal_sum_az_{0.0};
   double imu_cal_sum_gx_{0.0}, imu_cal_sum_gy_{0.0}, imu_cal_sum_gz_{0.0};
   std::vector<double> imu_cal_samples_ax_, imu_cal_samples_ay_;
   std::vector<double> imu_cal_samples_gx_, imu_cal_samples_gy_, imu_cal_samples_gz_;
