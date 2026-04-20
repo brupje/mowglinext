@@ -128,10 +128,15 @@ def generate_launch_description() -> LaunchDescription:
             f"[{fp_r:.3f}, {fp_hw:.3f}]]"
         )
 
-    # Read GPS lever arm from runtime config for FusionCore.
+    # Read GPS + IMU lever arms from runtime config for FusionCore.
+    # These act as explicit overrides; when zero, FusionCore auto-resolves
+    # the lever arms from TF (base_footprint -> sensor frame).
     gps_x = 0.0
     gps_y = 0.0
     gps_z = 0.0
+    imu_lever_x = 0.0
+    imu_lever_y = 0.0
+    imu_lever_z = 0.0
     runtime_robot_config = "/ros2_ws/config/mowgli_robot.yaml"
     if os.path.isfile(runtime_robot_config):
         with open(runtime_robot_config, "r") as f:
@@ -140,6 +145,9 @@ def generate_launch_description() -> LaunchDescription:
         gps_x = float(rt_rp.get("gps_x", 0.0))
         gps_y = float(rt_rp.get("gps_y", 0.0))
         gps_z = float(rt_rp.get("gps_z", 0.0))
+        imu_lever_x = float(rt_rp.get("imu_x", 0.0))
+        imu_lever_y = float(rt_rp.get("imu_y", 0.0))
+        imu_lever_z = float(rt_rp.get("imu_z", 0.0))
 
     # Compute BT XML paths from installed package shares (not hardcoded).
     bt_nav_to_pose_xml = os.path.join(
@@ -185,6 +193,12 @@ def generate_launch_description() -> LaunchDescription:
             {"gnss.lever_arm_x": gps_x},
             {"gnss.lever_arm_y": gps_y},
             {"gnss.lever_arm_z": gps_z},
+            # IMU lever arm from mowgli_robot.yaml (imu_x/y/z). 0 means
+            # "let FusionCore auto-resolve from the TF base_footprint ->
+            # imu_link translation"; non-zero overrides that.
+            {"imu.lever_arm_x": imu_lever_x},
+            {"imu.lever_arm_y": imu_lever_y},
+            {"imu.lever_arm_z": imu_lever_z},
         ],
         remappings=[
             ("/odom/wheels", "/wheel_odom"),

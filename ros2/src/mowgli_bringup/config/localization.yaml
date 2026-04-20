@@ -138,10 +138,31 @@ fusioncore_node:
     gnss.min_fix_type: 2
 
     # GPS antenna offset from base_link in body frame.
-    # Overridden at launch from mowgli_robot.yaml (gps_x/y/z).
+    # Leaving these at 0 lets FusionCore auto-resolve the lever arm from
+    # TF (base_footprint -> gps frame_id) on the first fix. The launch
+    # file still overrides these from mowgli_robot.yaml (gps_x/y/z) for
+    # explicitness, but either path works.
     gnss.lever_arm_x: 0.0
     gnss.lever_arm_y: 0.0
     gnss.lever_arm_z: 0.0
+
+    # IMU offset from base_link in body frame.
+    # Zero → auto-resolve from TF (base_footprint -> imu_link) on the
+    # first IMU message. Non-zero → explicit override. The launch file
+    # also passes mowgli_robot.yaml/imu_x/y/z as an override.
+    # FusionCore uses the lever arm to add the centripetal term
+    # ω×(ω×r) to the predicted accel so the IMU's offset from base_link
+    # doesn't leak into the fused state during turns.
+    imu.lever_arm_x: 0.0
+    imu.lever_arm_y: 0.0
+    imu.lever_arm_z: 0.0
+
+    # Apply the GNSS antenna lever arm from the very first fix, not only
+    # after heading_validated_. Safe with outlier_rejection on and RTK
+    # fixes: each position innovation observes yaw through the antenna
+    # offset and converges yaw in a few fixes instead of requiring 5 m
+    # of straight driving first.
+    gnss.apply_lever_arm_pre_heading: true
 
     # No second GPS receiver
     gnss.fix2_topic: ""
