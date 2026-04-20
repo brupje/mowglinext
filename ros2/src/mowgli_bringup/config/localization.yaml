@@ -64,6 +64,17 @@ fusioncore_node:
           durability: volatile
           history: keep_last
           depth: 10
+      # kinematic_icp_encoder_adapter.py publishes /encoder2/odom with
+      # BEST_EFFORT (sensor-data QoS). Without this override, FusionCore's
+      # default RELIABLE subscription is incompatible and silently drops
+      # every message ("New subscription discovered on topic '/encoder2/odom',
+      # requesting incompatible QoS").
+      /encoder2/odom:
+        subscription:
+          reliability: best_effort
+          durability: volatile
+          history: keep_last
+          depth: 10
 
     # IMU: differential gyro + accel only — no magnetometer.
     # hardware_bridge publishes identity orientation (no real heading).
