@@ -14,35 +14,44 @@
 """
 kinematic_icp.launch.py
 
-Starts the Kinematic-ICP LiDAR odometry pipeline for a 2D LD19 LiDAR:
+Kinematic-ICP on a parallel, fully-decoupled TF tree so there is NO
+feedback loop from its output back into its own motion prior.
 
-  1. kinematic_icp_online_node (kinematic_icp pkg, upstream)
-     - /scan (sensor_msgs/LaserScan) — native 2D input via use_2d_lidar=true
-     - Motion prior: TF delta of base_footprint across the scan window in
-       the odom frame. In Mowgli, FusionCore publishes odom -> base_footprint,
-       so that IS the motion prior source.
-     - Sensor extrinsic: static base_footprint -> lidar_link from URDF.
-     -> /kinematic_icp/lidar_odometry (nav_msgs/Odometry)
-     - publish_odom_tf: False (FusionCore owns odom -> base_footprint;
-       Kinematic-ICP MUST NOT publish a competing TF)
+    Real tree (owned by FusionCore + URDF):
+        odom  ->  base_footprint  ->  base_link  ->  lidar_link
 
-     NOTE ON FEEDBACK: Upstream PRBonn assumes the wheel-odom TF publisher
-     is a separate node from the downstream fusion filter. In Mowgli,
-     FusionCore IS the fusion filter AND the TF publisher, so using its
-     TF as Kinematic-ICP's motion prior creates a mild feedback loop
-     (K-ICP output -> encoder2 -> FusionCore -> odom TF -> K-ICP prior).
-     This is bounded by:
-       * FusionCore's strong anchors (GPS, wheels, IMU) dominating over
-         encoder2 (encoder2 covariance is intentionally loose)
-       * FusionCore's Mahalanobis gate on encoder2
-       * Kinematic-ICP's own kinematic regularization rejecting non-
-         physical corrections
-     If it becomes measurable in tests we will add a wheel-only TF
-     publisher + scan-frame republish to fully decouple the sub-graphs.
+    Parallel tree (K-ICP only):
+        wheel_odom_raw  ->  base_footprint_wheels  ->  lidar_link_wheels
 
-  2. kinematic_icp_encoder_adapter (mowgli_localization)
-     - /kinematic_icp/lidar_odometry  ->  finite-difference body-frame twist
-     -> /encoder2/odom                     (FusionCore's encoder2 slot)
+Data flow:
+
+  1. wheel_odom_tf_node (mowgli_localization)
+     - Subscribes /wheel_odom, integrates twist, broadcasts TF
+       `wheel_odom_raw -> base_footprint_wheels`. Independent of FusionCore.
+
+  2. kinematic_icp_scan_frame_relay (mowgli_localization)
+     - On startup, waits for the URDF's real `base_footprint -> lidar_link`
+       and mirrors it as a static TF `base_footprint_wheels -> lidar_link_wheels`
+       so the parallel tree has the sensor extrinsic. Then republishes /scan
+       on /scan_kicp with `header.frame_id` rewritten to `lidar_link_wheels`.
+     - Both frames live on the parallel tree only, so K-ICP's TF lookups
+       never touch FusionCore's state.
+
+  3. kinematic_icp_online_node (kinematic_icp pkg, upstream)
+     - lidar_topic = /scan_kicp (relayed), use_2d_lidar = true
+     - wheel_odom_frame = wheel_odom_raw (motion prior, raw wheels)
+     - base_frame       = base_footprint_wheels (sensor extrinsic origin)
+     - publish_odom_tf  = false (FusionCore owns odom -> base_footprint)
+     -> /kinematic_icp/lidar_odometry
+
+  4. kinematic_icp_encoder_adapter (mowgli_localization)
+     - Finite-differences /kinematic_icp/lidar_odometry pose into body-
+       frame twist, publishes /encoder2/odom for FusionCore's UKF.
+
+Because K-ICP's prior comes from a wheel-only node and its sensor TF is
+a static snapshot, nothing in FusionCore's fused state ever influences
+K-ICP's input. The adapter's encoder2 output feeds FusionCore, but there
+is no return path.
 """
 
 import os
@@ -66,11 +75,48 @@ def generate_launch_description() -> LaunchDescription:
     use_sim_time = LaunchConfiguration("use_sim_time")
 
     # ------------------------------------------------------------------
-    # 1. Kinematic-ICP online node.
-    #    - input 'lidar_topic' = /scan (LaserScan, use_2d_lidar=true)
-    #    - output remapped to /kinematic_icp/lidar_odometry
-    #    - wheel_odom_frame = odom (FusionCore-owned), base_frame = base_footprint
-    #    - publish_odom_tf: False (FusionCore owns odom -> base_footprint)
+    # 1. Wheel-only TF publisher (raw /wheel_odom integrated on isolated
+    #    frames — independent of FusionCore).
+    # ------------------------------------------------------------------
+    wheel_odom_tf = Node(
+        package="mowgli_localization",
+        executable="wheel_odom_tf_node.py",
+        name="wheel_odom_tf_node",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "input_topic": "/wheel_odom",
+                "parent_frame": "wheel_odom_raw",
+                "child_frame": "base_footprint_wheels",
+            }
+        ],
+    )
+
+    # ------------------------------------------------------------------
+    # 2. Scan-frame relay: mirrors the URDF sensor extrinsic onto the
+    #    parallel tree and republishes /scan with the mirrored frame_id.
+    # ------------------------------------------------------------------
+    scan_relay = Node(
+        package="mowgli_localization",
+        executable="kinematic_icp_scan_frame_relay.py",
+        name="kinematic_icp_scan_frame_relay",
+        output="screen",
+        parameters=[
+            {
+                "use_sim_time": use_sim_time,
+                "input_topic": "/scan",
+                "output_topic": "/scan_kicp",
+                "input_sensor_frame": "lidar_link",
+                "output_sensor_frame": "lidar_link_wheels",
+                "real_base_frame": "base_footprint",
+                "wheels_base_frame": "base_footprint_wheels",
+            }
+        ],
+    )
+
+    # ------------------------------------------------------------------
+    # 3. Kinematic-ICP online node (reads the relayed scan + parallel tree).
     # ------------------------------------------------------------------
     kinematic_icp_node = Node(
         package="kinematic_icp",
@@ -82,12 +128,11 @@ def generate_launch_description() -> LaunchDescription:
             kicp_config,
             {
                 "use_sim_time": use_sim_time,
-                "lidar_topic": "/scan",
+                "lidar_topic": "/scan_kicp",
                 "use_2d_lidar": True,
-                "wheel_odom_frame": "odom",
-                "base_frame": "base_footprint",
-                # Kinematic-ICP publishes lidar_odom_kicp -> base_footprint
-                # internally only; this frame is not consumed by anything else.
+                "wheel_odom_frame": "wheel_odom_raw",
+                "base_frame": "base_footprint_wheels",
+                # Internal frame only; nothing else consumes it.
                 "lidar_odom_frame": "lidar_odom_kicp",
                 "publish_odom_tf": False,
                 "invert_odom_tf": False,
@@ -100,8 +145,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     # ------------------------------------------------------------------
-    # 2. Encoder-twist adapter: pose-only KICP odometry -> FusionCore
-    #    encoder2 twist.
+    # 4. Encoder-twist adapter: K-ICP Odometry -> FusionCore encoder2.
     # ------------------------------------------------------------------
     kicp_encoder_adapter = Node(
         package="mowgli_localization",
@@ -120,6 +164,8 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             use_sim_time_arg,
+            wheel_odom_tf,
+            scan_relay,
             kinematic_icp_node,
             kicp_encoder_adapter,
         ]
