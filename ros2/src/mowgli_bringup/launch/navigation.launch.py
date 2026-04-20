@@ -132,15 +132,19 @@ def generate_launch_description() -> LaunchDescription:
             f"[{fp_r:.3f}, {fp_hw:.3f}]]"
         )
 
-    # Read GPS + IMU lever arms from runtime config for FusionCore.
-    # These act as explicit overrides; when zero, FusionCore auto-resolves
-    # the lever arms from TF (base_footprint -> sensor frame).
+    # Read GPS + IMU lever arms and the dock pose from runtime config.
+    # Lever arms act as explicit overrides for FusionCore; when zero, it
+    # auto-resolves them from TF (base_footprint -> sensor frame).
+    # Dock pose is fed into docking_server's home_dock.pose below.
     gps_x = 0.0
     gps_y = 0.0
     gps_z = 0.0
     imu_lever_x = 0.0
     imu_lever_y = 0.0
     imu_lever_z = 0.0
+    dock_pose_x = 0.0
+    dock_pose_y = 0.0
+    dock_pose_yaw = 0.0
     runtime_robot_config = "/ros2_ws/config/mowgli_robot.yaml"
     if os.path.isfile(runtime_robot_config):
         with open(runtime_robot_config, "r") as f:
@@ -152,6 +156,9 @@ def generate_launch_description() -> LaunchDescription:
         imu_lever_x = float(rt_rp.get("imu_x", 0.0))
         imu_lever_y = float(rt_rp.get("imu_y", 0.0))
         imu_lever_z = float(rt_rp.get("imu_z", 0.0))
+        dock_pose_x = float(rt_rp.get("dock_pose_x", 0.0))
+        dock_pose_y = float(rt_rp.get("dock_pose_y", 0.0))
+        dock_pose_yaw = float(rt_rp.get("dock_pose_yaw", 0.0))
 
     # Compute BT XML paths from installed package shares (not hardcoded).
     bt_nav_to_pose_xml = os.path.join(
@@ -168,6 +175,14 @@ def generate_launch_description() -> LaunchDescription:
         "use_sim_time": use_sim_time,
         "default_nav_to_pose_bt_xml": bt_nav_to_pose_xml,
         "default_nav_through_poses_bt_xml": bt_nav_through_poses_xml,
+        # Override docking_server's home_dock.pose with the user-configured
+        # dock_pose_x/y/yaw. Without this, the dock server always targets the
+        # map origin (0,0,0) regardless of the actual dock location/orientation,
+        # so DockRobot routinely misses, retries, and the BT appears "stuck"
+        # in RETURNING_HOME for up to ~5 min per call. Dotted path matches
+        # both nav2_params.yaml and nav2_params_no_lidar.yaml.
+        "docking_server.ros__parameters.home_dock.pose":
+            f"[{dock_pose_x}, {dock_pose_y}, {dock_pose_yaw}]",
     }
     if footprint_str:
         param_rewrites["footprint"] = footprint_str
