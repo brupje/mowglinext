@@ -406,12 +406,17 @@ local_costmap:
           raytrace_max_range: 6.0
           raytrace_min_range: 0.0
           obstacle_max_range: 4.0
-          # Blank returns within 0.65m: the dock sits ~50cm behind base_footprint
-          # when charging, and the BackUp behavior's collision checker (via
-          # behavior_server → local_costmap/costmap_raw) aborts undock at error
-          # 714 "Collision Ahead" if the dock is LETHAL. 0.65m blanks the dock
-          # but still catches real obstacles (walls/fences always >0.65m during
-          # mowing). observation_persistence=0 clears dock residue as robot
+          # Blank returns within 0.65m: on this robot the charge port is in
+          # front, so the dock body sits just ahead of base_footprint
+          # (roughly chassis_center_x + chassis_length/2 ≈ 45 cm) when
+          # docked. Whether the robot is approaching forward to dock or
+          # BackUp-ing to undock, the dock structure is always within 65 cm.
+          # Without the blank, it would be marked LETHAL and the BackUp
+          # behavior's collision checker (via behavior_server →
+          # local_costmap/costmap_raw) would abort undock at error 714
+          # "Collision Ahead". 0.65 m covers the dock but still catches
+          # real obstacles (walls/fences always >0.65 m during mowing).
+          # observation_persistence=0 clears dock residue as the robot
           # drives away, so this doesn't hurt post-undock navigation.
           obstacle_min_range: 0.65
           inf_is_valid: true
