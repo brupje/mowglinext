@@ -196,6 +196,7 @@ export function useMapFiles({
                 const content = event.target?.result as string;
                 const parts = content.split(",");
                 const newMap = JSON.parse(atob(parts[1])) as MapType;
+             
                 setMap(newMap);
             });
             reader.readAsDataURL(file);

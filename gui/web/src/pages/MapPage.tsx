@@ -171,11 +171,14 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
         notification,
         mapInstanceRef,
     });
+          useEffect(() => {
+        console.log('map changed!')
+    },[map])
     useEffect(() => {
         // Don't rebuild features from stream data while in edit mode —
         // path/plan becoming undefined when streams stop would wipe user edits.
-        if (editMap) return;
-
+     console.log('proces new map!')
+    console.log(map)
         let newFeatures: Record<string, MowingFeature> = {}
         if (map) {
             const workingAreas = buildFeatures(map.working_area??[], "area")
@@ -408,6 +411,7 @@ export const MapPage: React.FC<{compact?: boolean}> = ({compact = false}) => {
     if (_datumLon == 0 || _datumLat == 0) {
         return <Spinner/>
     }
+
     if (compact) {
         return (
             <div style={{width: '100%', height: '100%', position: 'relative'}}>

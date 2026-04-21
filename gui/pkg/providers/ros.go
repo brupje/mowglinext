@@ -146,7 +146,7 @@ type RosProvider struct {
 // the connection is established will be fulfilled once the connection comes up
 // via the foxglove client's reconnect loop.
 func NewRosProvider(dbProvider types2.IDBProvider) types2.IRosProvider {
-	foxgloveURL := "ws://localhost:8765"
+	foxgloveURL := "ws://mowerv2.lan:8765"
 	if url, err := dbProvider.Get("system.ros.foxgloveUrl"); err == nil && len(url) > 0 {
 		foxgloveURL = string(url)
 	}

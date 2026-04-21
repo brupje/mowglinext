@@ -59,6 +59,8 @@ export function useMapStreams({
         coordinates: [[number, number], [number, number], [number, number], [number, number]];
     } | null>(null);
 
+
+
     const highLevelStatus = useHighLevelStatus();
 
     const poseStream = useWS<string>(
@@ -362,6 +364,8 @@ export function useMapStreams({
             }
         } catch { /* layer may not exist yet */ }
     }, [lidarCollection]);
+
+  
 
     // Start/stop streams when editMap changes
     useEffect(() => {

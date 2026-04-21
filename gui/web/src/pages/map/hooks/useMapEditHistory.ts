@@ -38,7 +38,6 @@ export function useMapEditHistory({features, setFeatures, editMap, setEditMap}: 
                 onOk: exitEditMode,
             });
         } else {
-            exitEditMode();
         }
     }
 
