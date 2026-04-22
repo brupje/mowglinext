@@ -251,6 +251,32 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// IsLethalBoundaryViolation
+// ---------------------------------------------------------------------------
+
+/// Returns SUCCESS when the robot is outside all allowed areas by more than
+/// the configured lethal margin. Used to escalate BoundaryGuard from
+/// "try to navigate back inside" to "emergency stop + wait for operator"
+/// — blade/motors operating this far outside the authorised zone can
+/// cause real damage. State is fed from
+/// /map_server_node/lethal_boundary_violation (std_msgs/Bool).
+class IsLethalBoundaryViolation : public BT::ConditionNode
+{
+public:
+  IsLethalBoundaryViolation(const std::string& name, const BT::NodeConfig& config)
+      : BT::ConditionNode(name, config)
+  {
+  }
+
+  static BT::PortsList providedPorts()
+  {
+    return {};
+  }
+
+  BT::NodeStatus tick() override;
+};
+
+// ---------------------------------------------------------------------------
 // IsNewRain
 // ---------------------------------------------------------------------------
 

@@ -49,34 +49,61 @@
       </Fallback>
 
       <!-- ================================================================
-           GUARD 2: Boundary violation (stop + back up if outside area)
-           BackUp failure is non-fatal — robot stays stopped either way.
+           GUARD 2: Two-tier boundary violation
+             * Lethal violation (outside area by more than
+               lethal_boundary_margin_m, default 0.5m in map_server_node):
+               blade + motors operating this far outside the authorised
+               zone can cause real damage — emergency stop, wait for
+               operator. No automatic recovery.
+             * Soft violation (outside area but within the margin):
+               attempt to navigate back to the known-inside dock pose.
+               If Nav2 can route us back, normal mowing resumes. If it
+               can't inside two attempts, escalate to the lethal path.
+           The old behaviour was "BackUp 1m up to 5 times", which pushed
+           the robot FURTHER along whatever direction it just crossed
+           into — today's run ended with the robot ~50 cm past the
+           east edge of the polygon, and each recovery BackUp drove it
+           another 30 cm in the same wrong direction.
            ================================================================ -->
       <Fallback name="BoundaryGuard">
         <Inverter><IsBoundaryViolation/></Inverter>
-        <Sequence name="BoundaryHandler">
+
+        <!-- Lethal path: stop immediately, latch -->
+        <Sequence name="LethalBoundaryHandler">
+          <IsLethalBoundaryViolation/>
           <SetMowerEnabled enabled="false"/>
           <StopMoving/>
-          <PublishHighLevelStatus state="0" state_name="BOUNDARY_VIOLATION"/>
-          <Fallback name="BoundaryRecoveryOrStop">
-            <!-- Try backing up max 5 times to get back inside boundary -->
-            <RetryUntilSuccessful num_attempts="5">
-              <Sequence name="BackUpAndCheck">
-                <Fallback name="BoundaryBackUpOrWait">
-                  <BackUp backup_dist="1.0" backup_speed="0.20"/>
-                  <AlwaysSuccess/>
-                </Fallback>
-                <WaitForDuration duration_sec="2.0"/>
-                <!-- Succeed only if back inside boundary -->
+          <PublishHighLevelStatus state="0" state_name="BOUNDARY_EMERGENCY_STOP"/>
+          <!-- Hold here forever — operator intervention required. A long
+               wait prevents the tree from re-ticking and potentially
+               re-issuing goals; the emergency status is visible in the
+               GUI so the user knows to recover manually. -->
+          <WaitForDuration duration_sec="3600.0"/>
+        </Sequence>
+
+        <!-- Soft path: stop, then route back to a known-inside pose -->
+        <Sequence name="SoftBoundaryHandler">
+          <SetMowerEnabled enabled="false"/>
+          <StopMoving/>
+          <PublishHighLevelStatus state="2" state_name="BOUNDARY_RECOVERY"/>
+          <Fallback name="RecoverOrEscalate">
+            <!-- Navigate back to the dock (guaranteed inside the area
+                 if operator configured dock_pose correctly). Two tries
+                 before escalating to lethal behaviour. -->
+            <RetryUntilSuccessful num_attempts="2" name="RecoveryRetry">
+              <Sequence name="NavigateBackInside">
+                <DockRobot dock_id="home_dock" dock_type="simple_charging_dock"/>
+                <!-- Succeed only if the DockRobot action actually put us
+                     back inside a defined area. -->
                 <Inverter><IsBoundaryViolation/></Inverter>
               </Sequence>
             </RetryUntilSuccessful>
-            <!-- All 5 attempts exhausted — emergency stop -->
-            <Sequence name="BoundaryEmergencyStop">
+            <!-- Recovery failed — treat as lethal going forward. -->
+            <Sequence name="EscalateToEmergency">
               <SetMowerEnabled enabled="false"/>
               <StopMoving/>
               <PublishHighLevelStatus state="0" state_name="BOUNDARY_EMERGENCY_STOP"/>
-              <AlwaysSuccess/>
+              <WaitForDuration duration_sec="3600.0"/>
             </Sequence>
           </Fallback>
         </Sequence>
@@ -196,8 +223,13 @@
               <!-- BackUp instead of UndockRobot: opennav_docking isDocked()
                    uses geometric distance to dock pose which fails with
                    SLAM relocalization drift. BackUp reliably reverses
-                   off the dock via Nav2 behavior_server. -->
-              <BackUp backup_dist="2.0" backup_speed="0.20"/>
+                   off the dock via Nav2 behavior_server.
+                   Distance trimmed from 2.0m to 1.0m after an observed
+                   boundary-violation: 2m put the robot ~0.3m past the
+                   east edge of a tight garden polygon. 1m gives the F9P
+                   enough displacement to calibrate undock heading while
+                   staying safely inside typical boundaries. -->
+              <BackUp backup_dist="1.0" backup_speed="0.20"/>
               <!-- Wait for RTK Fixed after undock. The dock often has a
                    metal canopy that attenuates GPS; once the robot is 2 m
                    out the F9P should re-acquire quickly. Timeout proceeds

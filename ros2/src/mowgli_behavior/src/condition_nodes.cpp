@@ -176,6 +176,17 @@ BT::NodeStatus IsBoundaryViolation::tick()
 }
 
 // ---------------------------------------------------------------------------
+// IsLethalBoundaryViolation
+// ---------------------------------------------------------------------------
+
+BT::NodeStatus IsLethalBoundaryViolation::tick()
+{
+  auto ctx = config().blackboard->get<std::shared_ptr<BTContext>>("context");
+  return ctx->lethal_boundary_violation ? BT::NodeStatus::SUCCESS
+                                        : BT::NodeStatus::FAILURE;
+}
+
+// ---------------------------------------------------------------------------
 // IsNewRain
 // ---------------------------------------------------------------------------
 

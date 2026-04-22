@@ -39,6 +39,7 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<IsGPSFixed>("IsGPSFixed");
   factory.registerNodeType<ReplanNeeded>("ReplanNeeded");
   factory.registerNodeType<IsBoundaryViolation>("IsBoundaryViolation");
+  factory.registerNodeType<IsLethalBoundaryViolation>("IsLethalBoundaryViolation");
   factory.registerNodeType<IsNewRain>("IsNewRain");
   factory.registerNodeType<IsResumeUndockAllowed>("IsResumeUndockAllowed");
   factory.registerNodeType<IsChargingProgressing>("IsChargingProgressing");

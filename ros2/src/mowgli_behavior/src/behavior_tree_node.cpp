@@ -149,6 +149,19 @@ private:
                                                    context_->boundary_violation = msg->data;
                                                  });
 
+    // Lethal boundary: outside the allowed area by more than the
+    // configured margin (map_server_node's lethal_boundary_margin_m).
+    // When this trips, BoundaryGuard emergency-stops instead of trying
+    // to navigate back inside — too far gone for safe recovery.
+    lethal_boundary_violation_sub_ =
+        create_subscription<std_msgs::msg::Bool>(
+            "/map_server_node/lethal_boundary_violation", 10,
+            [this](std_msgs::msg::Bool::ConstSharedPtr msg)
+            {
+              std::lock_guard<std::mutex> lock(context_->context_mutex);
+              context_->lethal_boundary_violation = msg->data;
+            });
+
     // GPS position and quality for heading calibration during undock
     gps_sub_ = create_subscription<mowgli_interfaces::msg::AbsolutePose>(
         "/gps/absolute_pose",
@@ -381,6 +394,7 @@ private:
   rclcpp::Subscription<mowgli_interfaces::msg::Power>::SharedPtr power_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr replan_needed_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr boundary_violation_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr lethal_boundary_violation_sub_;
   rclcpp::Subscription<mowgli_interfaces::msg::AbsolutePose>::SharedPtr gps_sub_;
 
   // Service server
