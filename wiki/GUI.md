@@ -8,6 +8,8 @@ Default: `http://<mower-ip>:4006`
 
 ## Dashboard
 
+![Dashboard — mowing state](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/dashboard-mowing.png)
+
 The dashboard adapts to the mower's current state with a **hero card** that shows contextual information and actions:
 
 | State | Hero card | Actions |
@@ -30,9 +32,16 @@ The bottom row shows **Today's work** (zone progress, active zones), **Next up**
 
 ### Mobile
 
+![Dashboard — mobile](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/dashboard-mobile.png)
+
 On mobile, the dashboard stacks vertically: compact hero card, 2x2 tile grid, and collapsible sensor/system panels. All buttons expand to full width. The bottom tab bar provides quick access to Home, Map, Stats, and Settings.
 
 ## Pages
+
+| | |
+|---|---|
+| ![Map](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/map.png) | ![Schedule](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/schedule.png) |
+| ![Statistics](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/stats.png) | ![Dashboard idle](https://raw.githubusercontent.com/cedbossneo/mowglinext/dev/docs/screenshots/dashboard-idle.png) |
 
 | Page | Description |
 |------|-------------|
