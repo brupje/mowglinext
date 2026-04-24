@@ -123,6 +123,16 @@ install(
   DESTINATION share/${PROJECT_NAME}/config
 )
 
+# Python nodes (installed executable, run via `ros2 run mowgli_localization ...`)
+install(
+  PROGRAMS
+    scripts/calibrate_imu_yaw_node.py
+    scripts/kinematic_icp_encoder_adapter.py
+    scripts/kinematic_icp_scan_frame_relay.py
+    scripts/wheel_odom_tf_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 # ---------------------------------------------------------------------------
 # Testing
 # ---------------------------------------------------------------------------

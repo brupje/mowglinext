@@ -10,7 +10,7 @@
     z  up
 
   Key dimensions (from real YardForce Classic 500 URDF):
-    Base:          0.54 m long, 0.40 m wide, 0.19 m high
+    Base:          0.60 m long, 0.40 m wide, 0.19 m high
     Drive wheels:  radius 0.04475 m, width 0.04 m, track 0.40 m (rear)
     Front casters: radius 0.03 m, width 0.03 m
     Blade disc:    radius 0.09 m, height 0.01 m (centred under base)
@@ -30,6 +30,13 @@
   <xacro:arg name="imu_x"     default="0.18"/>
   <xacro:arg name="imu_y"     default="0.0"/>
   <xacro:arg name="imu_z"     default="0.095"/>
+  <!-- Full 3-axis mounting rotation (roll, pitch, yaw) in radians.
+       yaw=only handles chip-Z ≡ robot-Z mounts. Upside-down, side-mounted,
+       or tilted installations require roll/pitch too. Firmware reports the
+       WT901's chip-native axes unchanged, so this URDF rotation is the
+       sole correction. -->
+  <xacro:arg name="imu_roll"  default="0.0"/>
+  <xacro:arg name="imu_pitch" default="0.0"/>
   <xacro:arg name="imu_yaw"   default="0.0"/>
 
   <xacro:arg name="gps_x"     default="0.3"/>
@@ -37,10 +44,10 @@
   <xacro:arg name="gps_z"     default="0.20"/>
 
   <!-- Chassis shape (all from mowgli_robot.yaml via launch file) -->
-  <xacro:arg name="chassis_length"   default="0.54"/>
+  <xacro:arg name="chassis_length"   default="0.60"/>
   <xacro:arg name="chassis_width"    default="0.40"/>
   <xacro:arg name="chassis_height"   default="0.19"/>
-  <xacro:arg name="chassis_center_x" default="0.18"/>
+  <xacro:arg name="chassis_center_x" default="0.20"/>
   <xacro:arg name="wheel_radius"     default="0.04475"/>
   <xacro:arg name="wheel_width"      default="0.04"/>
   <xacro:arg name="wheel_track"      default="0.325"/>
@@ -317,7 +324,8 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child  link="imu_link"/>
-    <origin xyz="$(arg imu_x) $(arg imu_y) $(arg imu_z)" rpy="0 0 $(arg imu_yaw)"/>
+    <origin xyz="$(arg imu_x) $(arg imu_y) $(arg imu_z)"
+            rpy="$(arg imu_roll) $(arg imu_pitch) $(arg imu_yaw)"/>
   </joint>
 
   <!-- ================================================================

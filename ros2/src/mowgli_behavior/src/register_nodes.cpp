@@ -39,9 +39,12 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<IsGPSFixed>("IsGPSFixed");
   factory.registerNodeType<ReplanNeeded>("ReplanNeeded");
   factory.registerNodeType<IsBoundaryViolation>("IsBoundaryViolation");
+  factory.registerNodeType<IsLethalBoundaryViolation>("IsLethalBoundaryViolation");
   factory.registerNodeType<IsNewRain>("IsNewRain");
   factory.registerNodeType<IsResumeUndockAllowed>("IsResumeUndockAllowed");
   factory.registerNodeType<IsChargingProgressing>("IsChargingProgressing");
+  factory.registerNodeType<PreFlightCheck>("PreFlightCheck");
+  factory.registerNodeType<Nav2Active>("Nav2Active");
 
   // Action nodes
   factory.registerNodeType<SetMowerEnabled>("SetMowerEnabled");
@@ -49,10 +52,12 @@ void registerAllNodes(BT::BehaviorTreeFactory& factory)
   factory.registerNodeType<ClearCostmap>("ClearCostmap");
   factory.registerNodeType<PublishHighLevelStatus>("PublishHighLevelStatus");
   factory.registerNodeType<WaitForDuration>("WaitForDuration");
+  factory.registerNodeType<WaitForGpsFix>("WaitForGpsFix");
   factory.registerNodeType<NavigateToPose>("NavigateToPose");
   factory.registerNodeType<SaveSlamMap>("SaveSlamMap");
   factory.registerNodeType<BackUp>("BackUp");
   factory.registerNodeType<ClearCommand>("ClearCommand");
+  factory.registerNodeType<IncrementSkippedSwaths>("IncrementSkippedSwaths");
   factory.registerNodeType<SaveObstacles>("SaveObstacles");
   factory.registerNodeType<SetNavMode>("SetNavMode");
   factory.registerNodeType<WasRainingAtStart>("WasRainingAtStart");
